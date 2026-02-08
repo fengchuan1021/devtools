@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 桌面端：最小宽度限制，不考虑移动端 */
+body {
+  margin: 0;
+  min-width: 1024px;
+  min-height: 100vh;
+}
+
+#app {
+  min-width: 1024px;
+  min-height: 100vh;
+}
