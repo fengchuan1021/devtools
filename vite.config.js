@@ -12,6 +12,10 @@ export default defineConfig({
         target: 'http://192.168.1.234:8080',
         changeOrigin: true,
       },
+      '/ws': {
+        target: 'http://192.168.1.234:8080',
+        ws: true,
+      },
     },
   },
 })

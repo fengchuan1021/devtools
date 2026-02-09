@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@primeuix/themes": "^2.0.3",
+    "monaco-editor": "^0.55.1",
+    "monaco-editor-vue3": "^1.0.5",
     "pinia": "^3.0.4",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",

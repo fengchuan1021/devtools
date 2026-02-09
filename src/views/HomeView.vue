@@ -1,6 +1,8 @@
 <script setup>
+import { onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDeviceStore } from '../stores/device'
+import { useWebSocket } from '../composables/useWebSocket'
 import DeviceScreenshotArea from '../components/DeviceScreenshotArea.vue'
 import DeviceToolbar from '../components/DeviceToolbar.vue'
 import NodeInfoPanel from '../components/NodeInfoPanel.vue'
@@ -8,6 +10,11 @@ import ScriptPanel from '../components/ScriptPanel.vue'
 
 const deviceStore = useDeviceStore()
 const { selectedDevice } = storeToRefs(deviceStore)
+const { connect } = useWebSocket()
+
+onMounted(() => {
+  connect()
+})
 </script>
 
 <template>
