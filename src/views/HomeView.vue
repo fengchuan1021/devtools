@@ -7,10 +7,11 @@ import DeviceScreenshotArea from '../components/DeviceScreenshotArea.vue'
 import DeviceToolbar from '../components/DeviceToolbar.vue'
 import NodeInfoPanel from '../components/NodeInfoPanel.vue'
 import ScriptPanel from '../components/ScriptPanel.vue'
+import LogPanel from '../components/LogPanel.vue'
 
 const deviceStore = useDeviceStore()
 const { selectedDevice } = storeToRefs(deviceStore)
-const { connect } = useWebSocket()
+const { connect } = useWebSocket(selectedDevice)
 
 onMounted(() => {
   connect()
@@ -32,8 +33,9 @@ onMounted(() => {
         <NodeInfoPanel />
       </main>
 
-      <aside class="w-1/3 min-w-[280px] shrink-0">
+      <aside class="flex w-1/3 min-w-[280px] shrink-0 flex-col gap-3 overflow-hidden">
         <ScriptPanel />
+        <LogPanel :serial="selectedDevice?.serial ?? ''" />
       </aside>
     </div>
   </div>

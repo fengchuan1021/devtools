@@ -3,6 +3,11 @@ import { storeToRefs } from 'pinia'
 import { useLogStore } from '../stores/log'
 import Button from 'primevue/button'
 
+const props = defineProps({
+  /** 当前监控的设备 serial，日志来自该设备 */
+  serial: { type: String, default: '' },
+})
+
 const logStore = useLogStore()
 const { entries } = storeToRefs(logStore)
 
@@ -17,7 +22,9 @@ const levelClass = {
 <template>
   <div class="flex flex-col rounded-lg border border-slate-200 bg-slate-50">
     <div class="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2">
-      <span class="text-sm font-medium text-slate-700">日志</span>
+      <span class="text-sm font-medium text-slate-700">
+        日志{{ props.serial ? ` (${props.serial})` : '' }}
+      </span>
       <Button
         icon="pi pi-trash"
         label="清空"
