@@ -2,6 +2,13 @@ import { getItem, removeItem } from './storage'
 
 const BASE_URL = import.meta.env.VITE_API_BASE || ''
 
+/** 401 时清除登录态并跳转登录页（供 request 与 screenshot 等复用） */
+export function redirectToLogin() {
+  removeItem('token')
+  removeItem('user')
+  window.location.href = '/login'
+}
+
 async function request(url, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -17,9 +24,7 @@ async function request(url, options = {}) {
 
   if (!res.ok) {
     if (res.status === 401) {
-      removeItem('token')
-      removeItem('user')
-      window.location.href = '/login'
+      redirectToLogin()
       throw new Error(data?.error || '登录已过期')
     }
     const err = new Error(data?.error || '请求失败')

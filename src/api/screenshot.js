@@ -2,6 +2,9 @@
  * 截图 API
  */
 
+import { getItem } from '../utils/storage'
+import { redirectToLogin } from '../utils/request'
+
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 /**
@@ -25,7 +28,15 @@ export function getScreenShotUrl(serial, t = Date.now()) {
 export async function fetchScreenShot(serial) {
   if (!serial) throw new Error('serial required')
   const url = getScreenShotUrl(serial)
-  const res = await fetch(url)
+  const token = getItem('token')
+  const headers = {}
+  if (token && String(token).trim()) headers.token = token
+
+  const res = await fetch(url, { headers })
+  if (res.status === 401) {
+    redirectToLogin()
+    throw new Error('登录已过期')
+  }
   if (!res.ok) {
     const text = await res.text()
     let msg = '截图获取失败'
