@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDeviceStore } from '../stores/device'
-import { fetchScreenShot } from '../api/screenshot'
+import { fetchScreenShot } from '../api/device'
 import Card from 'primevue/card'
 
 const props = defineProps({
