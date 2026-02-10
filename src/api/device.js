@@ -59,3 +59,16 @@ export async function fetchScreenShot(serial) {
   const url = `/api/dev/getScreenShot?${new URLSearchParams({ serial })}`
   return request.getBlob(url)
 }
+
+/**
+ * 在指定设备上执行脚本（管理端）
+ * @param {string} serial - 设备序列号
+ * @param {string} script - 脚本内容
+ * @returns {Promise<{data: string}>}
+ */
+export async function runDevScript(serial, script) {
+  if (!serial?.trim()) throw new Error('serial 必填')
+  if (script == null) throw new Error('script 必填')
+  const res = await request.post('/api/dev/runDevScript', { serial: serial.trim(), script: String(script) })
+  return res
+}

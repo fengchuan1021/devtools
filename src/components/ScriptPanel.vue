@@ -8,8 +8,11 @@ import Select from 'primevue/select'
 import Checkbox from 'primevue/checkbox'
 import Tree from 'primevue/tree'
 import { CodeEditor } from 'monaco-editor-vue3'
+import { storeToRefs } from 'pinia'
+import { useDeviceStore } from '../stores/device'
 import { getScriptCategories, createScriptCategory, createScript, updateScript, getScriptsTree, getScript } from '../api/script'
 import { getApplications } from '../api/application'
+import { runDevScript } from '../api/device'
 
 const code = ref(`// 在此编写 JavaScript 脚本
 function hello() {
@@ -25,8 +28,29 @@ const editorOptions = {
   automaticLayout: true,
 }
 
-const runScript = () => {
-  console.log('执行脚本:', code.value)
+const deviceStore = useDeviceStore()
+const { selectedDevice } = storeToRefs(deviceStore)
+
+const runScriptLoading = ref(false)
+const runScriptMessage = ref('')
+
+const runScript = async () => {
+  const serial = selectedDevice.value?.serial
+  if (!serial) {
+    runScriptMessage.value = '请先选择设备'
+    return
+  }
+  runScriptMessage.value = ''
+  runScriptLoading.value = true
+  try {
+    const res = await runDevScript(serial, code.value)
+    const data = res?.data ?? ''
+    runScriptMessage.value = data ? `执行结果: ${data}` : '已下发执行'
+  } catch (e) {
+    runScriptMessage.value = e?.response?.data?.error || e?.message || '执行失败'
+  } finally {
+    runScriptLoading.value = false
+  }
 }
 
 const saveDialogVisible = ref(false)
@@ -231,12 +255,14 @@ onMounted(() => {
             @click="openSaveDialog"
           />
         </div>
+        <p v-if="runScriptMessage" class="text-sm mb-2" :class="runScriptMessage.startsWith('执行结果') ? 'text-green-600' : 'text-amber-600'">{{ runScriptMessage }}</p>
         <div class="relative h-[280px] rounded-lg border border-slate-200 overflow-hidden">
           <Button
             icon="pi pi-play"
             label="执行"
             class="!absolute top-2 right-2 z-10 shadow-md"
             size="small"
+            :loading="runScriptLoading"
             @click="runScript"
           />
           <CodeEditor
