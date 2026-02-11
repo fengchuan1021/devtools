@@ -255,7 +255,6 @@ onMounted(() => {
             @click="openSaveDialog"
           />
         </div>
-        <p v-if="runScriptMessage" class="text-sm mb-2" :class="runScriptMessage.startsWith('执行结果') ? 'text-green-600' : 'text-amber-600'">{{ runScriptMessage }}</p>
         <div class="relative h-[280px] rounded-lg border border-slate-200 overflow-hidden">
           <Button
             icon="pi pi-play"
