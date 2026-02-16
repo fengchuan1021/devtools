@@ -13,6 +13,8 @@ import { useDeviceStore } from '../stores/device'
 import { getScriptCategories, createScriptCategory, createScript, updateScript, getScriptsTree, getScript } from '../api/script'
 import { getApplications } from '../api/application'
 import { runDevScript } from '../api/device'
+import ScriptCategoryManagerView from './ScriptCategoryManagerView.vue'
+import ScriptManagerView from './ScriptManagerView.vue'
 
 const code = ref(`// 在此编写 JavaScript 脚本
 function hello() {
@@ -68,6 +70,8 @@ const saveLoading = ref(false)
 const saveError = ref('')
 
 const loadDialogVisible = ref(false)
+const categoryManagerVisible = ref(false)
+const scriptManagerVisible = ref(false)
 const loadTreeNodes = ref([])
 const loadTreeLoading = ref(false)
 const loadScriptLoading = ref(false)
@@ -243,6 +247,20 @@ onMounted(() => {
       <div class="flex flex-col gap-2">
         <div class="flex justify-end gap-2">
           <Button
+            icon="pi pi-list"
+            label="分类管理"
+            size="small"
+            severity="secondary"
+            @click="categoryManagerVisible = true"
+          />
+          <Button
+            icon="pi pi-code"
+            label="脚本管理"
+            size="small"
+            severity="secondary"
+            @click="scriptManagerVisible = true"
+          />
+          <Button
             icon="pi pi-folder-open"
             label="加载"
             size="small"
@@ -330,6 +348,26 @@ onMounted(() => {
       <Button label="取消" text @click="saveDialogVisible = false" />
       <Button label="确认" :loading="saveLoading" @click="confirmSave" />
     </template>
+  </Dialog>
+
+  <Dialog
+    v-model:visible="categoryManagerVisible"
+    header="分类管理"
+    modal
+    :style="{ width: '480px' }"
+    :dismissable-mask="true"
+  >
+    <ScriptCategoryManagerView @change="loadCategories" />
+  </Dialog>
+
+  <Dialog
+    v-model:visible="scriptManagerVisible"
+    header="脚本管理"
+    modal
+    :style="{ width: '520px' }"
+    :dismissable-mask="true"
+  >
+    <ScriptManagerView @change="loadCategories" />
   </Dialog>
 
   <Dialog

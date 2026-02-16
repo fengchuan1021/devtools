@@ -54,5 +54,6 @@ export default {
   get: (url) => request(url, { method: 'GET' }),
   post: (url, body) => request(url, { method: 'POST', body: JSON.stringify(body) }),
   patch: (url, body) => request(url, { method: 'PATCH', body: JSON.stringify(body) }),
+  delete: (url) => request(url, { method: 'DELETE' }),
   getBlob,
 }
