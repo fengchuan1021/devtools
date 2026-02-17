@@ -19,6 +19,7 @@ const { screenshotRefreshKey } = storeToRefs(deviceStore)
 const imageUrl = ref('')
 const loading = ref(false)
 const error = ref('')
+const imgRef = ref(null)
 
 async function loadScreenshot() {
   if (!props.serial) {
@@ -40,6 +41,20 @@ async function loadScreenshot() {
   } finally {
     loading.value = false
   }
+}
+
+/** 将点击位置转换为设备像素坐标，并通知 store，用于在 xmllayout 中定位节点 */
+function onImageClick(e) {
+  const img = imgRef.value
+  if (!img || !img.naturalWidth) return
+  const rect = img.getBoundingClientRect()
+  const displayX = e.clientX - rect.left
+  const displayY = e.clientY - rect.top
+  const scaleX = img.naturalWidth / rect.width
+  const scaleY = img.naturalHeight / rect.height
+  const x = displayX * scaleX
+  const y = displayY * scaleY
+  deviceStore.setSelectedPoint({ x, y })
 }
 
 watch(
@@ -72,9 +87,11 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="imageUrl">
           <img
+            ref="imgRef"
             :src="imageUrl"
             alt="设备截图"
-            class="max-h-full max-w-full object-contain"
+            class="max-h-full max-w-full cursor-crosshair object-contain"
+            @click="onImageClick"
           />
         </template>
       </div>

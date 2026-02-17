@@ -30,7 +30,7 @@ onMounted(() => {
       </aside>
 
       <main class="min-w-0 flex-1">
-        <NodeInfoPanel />
+        <NodeInfoPanel :serial="selectedDevice?.serial ?? ''"  />
       </main>
 
       <aside class="flex w-1/3 min-w-[280px] shrink-0 flex-col gap-3 overflow-hidden">

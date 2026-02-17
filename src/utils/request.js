@@ -50,10 +50,28 @@ async function getBlob(url) {
   return res.blob()
 }
 
+/** GET 请求并返回响应正文为纯文本（如 XML） */
+async function getText(url) {
+  const headers = {}
+  const token = getItem('token')
+  if (token && String(token).trim()) headers.token = token
+  const res = await fetch(`${BASE_URL}${url}`, { method: 'GET', headers })
+  if (res.status === 401) {
+    redirectToLogin()
+    throw new Error('登录已过期')
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data?.error || '请求失败')
+  }
+  return res.text()
+}
+
 export default {
   get: (url) => request(url, { method: 'GET' }),
   post: (url, body) => request(url, { method: 'POST', body: JSON.stringify(body) }),
   patch: (url, body) => request(url, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: (url) => request(url, { method: 'DELETE' }),
   getBlob,
+  getText,
 }

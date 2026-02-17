@@ -13,6 +13,8 @@ export const useDeviceStore = defineStore('device', {
     searching: false,
     /** 截图刷新标记，点击刷新时递增以触发子组件刷新 */
     screenshotRefreshKey: 0,
+    /** 截图上的点击坐标（设备像素），用于在 xmllayout 中定位节点 { x, y } */
+    selectedPoint: null,
   }),
 
   actions: {
@@ -70,6 +72,11 @@ export const useDeviceStore = defineStore('device', {
     /** 刷新设备截图 */
     refreshScreenshot() {
       this.screenshotRefreshKey += 1
+    },
+
+    /** 设置截图上的点击坐标，用于在 NodeInfoPanel 中展示对应 xmllayout 节点 */
+    setSelectedPoint(point) {
+      this.selectedPoint = point == null ? null : { x: Math.round(point.x), y: Math.round(point.y) }
     },
   },
 })

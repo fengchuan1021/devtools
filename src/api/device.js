@@ -49,6 +49,7 @@ export function getScreenShotUrl(serial, t = Date.now()) {
   return `${API_BASE}/api/dev/getScreenShot?${params}`
 }
 
+
 /**
  * 请求设备截图（返回 blob，用于创建 object URL）
  * @param {string} serial - 设备序列号
@@ -71,4 +72,14 @@ export async function runDevScript(serial, script) {
   if (script == null) throw new Error('script 必填')
   const res = await request.post('/api/dev/runDevScript', { serial: serial.trim(), script: String(script) })
   return res
+}
+/**
+ * 获取设备当前 UI 层级 XML（与截图对应的 xmllayout）
+ * @param {string} serial - 设备序列号
+ * @returns {Promise<string>} XML 字符串
+ */
+export async function getXmlLayout(serial) {
+  if (!serial) return ''
+  const url = `/api/dev/getXmlLayout?${new URLSearchParams({ serial })}`
+  return request.getText(url)
 }
