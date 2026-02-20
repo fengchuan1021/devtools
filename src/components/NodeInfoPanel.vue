@@ -53,14 +53,14 @@ function parseBounds(boundsStr) {
   }
 }
 
-/** 在 XML 字符串中查找包含 (x,y) 的最内层 node（面积最小的） */
-function findNodeAtPoint(xmlString, x, y) {
-  if (!xmlString || typeof x !== 'number' || typeof y !== 'number') return null
+/** 在 XML 中查找包含 (x,y) 的所有 node，按面积从小到大排序，返回 { bounds, attrs } 数组 */
+function findAllNodesAtPoint(xmlString, x, y) {
+  if (!xmlString || typeof x !== 'number' || typeof y !== 'number') return []
   let doc
   try {
     doc = new DOMParser().parseFromString(xmlString, 'text/xml')
   } catch {
-    return null
+    return []
   }
   const nodes = doc.querySelectorAll('node')
   const containing = []
@@ -70,17 +70,21 @@ function findNodeAtPoint(xmlString, x, y) {
     if (!b) continue
     if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) {
       const area = b.width * b.height
-      containing.push({ el, area, bounds: b })
+      const attrs = {}
+      for (const a of el.attributes) {
+        attrs[a.name] = a.value
+      }
+      containing.push({ area, bounds: b, attrs })
     }
   }
-  if (containing.length === 0) return null
   containing.sort((a, b) => a.area - b.area)
-  const { el } = containing[0]
-  const attrs = {}
-  for (const a of el.attributes) {
-    attrs[a.name] = a.value
-  }
-  return attrs
+  return containing.map((item) => ({ bounds: item.bounds, attrs: item.attrs }))
+}
+
+/** 在 XML 字符串中查找包含 (x,y) 的最内层 node（面积最小的），返回其属性 */
+function findNodeAtPoint(xmlString, x, y) {
+  const all = findAllNodesAtPoint(xmlString, x, y)
+  return all.length ? all[0].attrs : null
 }
 
 const selectedNode = computed(() => {
@@ -88,6 +92,32 @@ const selectedNode = computed(() => {
   if (!point || !xmllayout.value) return null
   return findNodeAtPoint(xmllayout.value, point.x, point.y)
 })
+
+async function copyValueToClipboard(key,text) {
+  try {
+    let txt='';
+    console.log(key);
+    if(key==='class'){
+      txt='className("'+text+'")'
+    }
+    else if(key==='text'){
+      txt='text("'+text+'")'
+    }
+    else if(key==='content-desc'){
+      txt='desc("'+text+'")'
+    }
+    else if(key==='resource-id'){
+      txt='id("'+text+'")'
+    }
+    else{
+      txt=text
+    }
+ 
+    await navigator.clipboard.writeText(txt)
+  } catch {
+    // 降级：部分环境无 clipboard API
+  }
+}
 
 const nodeInfoEntries = computed(() => {
   const node = selectedNode.value
@@ -111,12 +141,27 @@ const nodeInfoEntries = computed(() => {
     'visible-to-user',
     'index',
   ]
-  return order.filter((k) => node[k] != null && node[k] !== '').map((k) => ({ key: k, value: node[k] }))
+  return order.filter((k) => node[k] != null).map((k) => ({ key: k, value: node[k] }))
 })
 
 watch(
   [() => props.serial, screenshotRefreshKey],
   () => loadXmlLayout(),
+  { immediate: true }
+)
+
+watch(
+  [selectedPoint, xmllayout],
+  () => {
+    const point = selectedPoint.value
+    const xml = xmllayout.value
+    if (!point || !xml) {
+      deviceStore.setContainingNodesBounds([])
+      return
+    }
+    const list = findAllNodesAtPoint(xml, point.x, point.y)
+    deviceStore.setContainingNodesBounds(list.map((item) => item.bounds))
+  },
   { immediate: true }
 )
 </script>
@@ -154,8 +199,22 @@ watch(
           </p>
           <dl class="space-y-1.5 text-sm">
             <template v-for="entry in nodeInfoEntries" :key="entry.key">
-              <dt class="font-medium text-slate-600">{{ entry.key }}</dt>
-              <dd class="break-all pl-2 text-slate-800">{{ entry.value }}</dd>
+              <div class="flex items-center gap-x-2">
+                <dt class="w-28 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  {{ entry.key }}
+                </dt>
+                <dd class="min-w-0 flex-1 break-all font-normal text-slate-900">
+                  {{ entry.value }}
+                </dd>
+                <button
+                  type="button"
+                  class="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                  title="复制"
+                  @click="copyValueToClipboard(entry.key,entry.value)"
+                >
+                  <i class="pi pi-copy text-sm"></i>
+                </button>
+              </div>
             </template>
           </dl>
         </template>

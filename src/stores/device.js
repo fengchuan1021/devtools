@@ -15,6 +15,8 @@ export const useDeviceStore = defineStore('device', {
     screenshotRefreshKey: 0,
     /** 截图上的点击坐标（设备像素），用于在 xmllayout 中定位节点 { x, y } */
     selectedPoint: null,
+    /** 包含点击点的所有节点的 bounds 列表，用于在截图上绘制矩形 [{ left, top, right, bottom, width, height }, ...] */
+    containingNodesBounds: [],
   }),
 
   actions: {
@@ -77,6 +79,11 @@ export const useDeviceStore = defineStore('device', {
     /** 设置截图上的点击坐标，用于在 NodeInfoPanel 中展示对应 xmllayout 节点 */
     setSelectedPoint(point) {
       this.selectedPoint = point == null ? null : { x: Math.round(point.x), y: Math.round(point.y) }
+    },
+
+    /** 设置包含点击点的所有节点的 bounds，用于在截图上绘制矩形 */
+    setContainingNodesBounds(bounds) {
+      this.containingNodesBounds = Array.isArray(bounds) ? bounds : []
     },
   },
 })

@@ -14,12 +14,14 @@ const props = defineProps({
 })
 
 const deviceStore = useDeviceStore()
-const { screenshotRefreshKey } = storeToRefs(deviceStore)
+const { screenshotRefreshKey, containingNodesBounds } = storeToRefs(deviceStore)
 
 const imageUrl = ref('')
 const loading = ref(false)
 const error = ref('')
 const imgRef = ref(null)
+/** 图片原始尺寸（设备像素），用于 SVG viewBox 与矩形坐标 */
+const imageNaturalSize = ref({ width: 0, height: 0 })
 
 async function loadScreenshot() {
   if (!props.serial) {
@@ -57,6 +59,15 @@ function onImageClick(e) {
   deviceStore.setSelectedPoint({ x, y })
 }
 
+function onImageLoad() {
+  const img = imgRef.value
+  if (img && img.naturalWidth && img.naturalHeight) {
+    imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+  } else {
+    imageNaturalSize.value = { width: 0, height: 0 }
+  }
+}
+
 watch(
   [() => props.serial, screenshotRefreshKey],
   () => loadScreenshot(),
@@ -89,13 +100,41 @@ onBeforeUnmount(() => {
           <div
             class="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
           >
-            <img
-              ref="imgRef"
-              :src="imageUrl"
-              alt="设备截图"
-              class="max-h-full max-w-full cursor-crosshair object-contain"
-              @click="onImageClick"
-            />
+            <div
+              class="relative max-h-full max-w-full"
+              :style="
+                imageNaturalSize.width && imageNaturalSize.height
+                  ? { aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}` }
+                  : {}
+              "
+            >
+              <img
+                ref="imgRef"
+                :src="imageUrl"
+                alt="设备截图"
+                class="block h-full w-full cursor-crosshair object-contain"
+                @click="onImageClick"
+                @load="onImageLoad"
+              />
+              <svg
+                v-if="imageNaturalSize.width && imageNaturalSize.height && containingNodesBounds.length"
+                class="pointer-events-none absolute inset-0 block h-full w-full"
+                :viewBox="`0 0 ${imageNaturalSize.width} ${imageNaturalSize.height}`"
+                preserveAspectRatio="none"
+              >
+                <rect
+                  v-for="(b, i) in containingNodesBounds"
+                  :key="i"
+                  :x="b.left"
+                  :y="b.top"
+                  :width="b.width"
+                  :height="b.height"
+                  fill="none"
+                  stroke="rgba(59, 130, 246, 0.85)"
+                  stroke-width="4"
+                />
+              </svg>
+            </div>
           </div>
         </template>
       </div>
