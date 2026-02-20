@@ -24,7 +24,7 @@ onMounted(() => {
       <DeviceToolbar />
     </header>
 
-    <div class="flex flex-1 gap-4 overflow-hidden p-4">
+    <div class="flex flex-1 gap-4 p-4">
       <aside class="w-1/3 min-w-[280px] shrink-0">
         <DeviceScreenshotArea :serial="selectedDevice?.serial ?? ''" />
       </aside>
