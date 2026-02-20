@@ -123,7 +123,7 @@ watch(
 
 <template>
   <Card class="h-full">
-    <template #title>节点信息</template>
+  
     <template #content>
       <div
         class="flex min-h-[300px] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-3"

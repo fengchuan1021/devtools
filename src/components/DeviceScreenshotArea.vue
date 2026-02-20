@@ -70,10 +70,10 @@ onBeforeUnmount(() => {
 
 <template>
   <Card class="h-full">
-    <template #title>设备截图</template>
+ 
     <template #content>
       <div
-        class="flex min-h-[400px] flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-dashed border-slate-200 bg-slate-50"
+        class="flex h-full min-h-0 min-h-[400px] flex-col items-center justify-center overflow-hidden"
       >
         <template v-if="!serial">
           <span class="text-slate-400">请先选择设备</span>
@@ -86,15 +86,26 @@ onBeforeUnmount(() => {
           <span class="text-red-500">{{ error }}</span>
         </template>
         <template v-else-if="imageUrl">
-          <img
-            ref="imgRef"
-            :src="imageUrl"
-            alt="设备截图"
-            class="max-h-full max-w-full cursor-crosshair object-contain"
-            @click="onImageClick"
-          />
+          <div
+            class="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
+          >
+            <img
+              ref="imgRef"
+              :src="imageUrl"
+              alt="设备截图"
+              class="max-h-full max-w-full cursor-crosshair object-contain"
+              @click="onImageClick"
+            />
+          </div>
         </template>
       </div>
     </template>
   </Card>
 </template>
+
+<style scoped>
+:deep(.p-card-body),
+:deep(.p-card-content) {
+  height: 100%;
+}
+</style>
