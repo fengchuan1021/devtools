@@ -43,7 +43,7 @@ const runScript = async () => {
     return
   }
   runScriptMessage.value = ''
-  runScriptLoading.value = true
+  //runScriptLoading.value = true
   try {
     const res = await runDevScript(serial, code.value)
     const data = res?.data ?? ''
@@ -241,7 +241,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <Card class="h-full">
+  <Card>
   
     <template #content>
       <div class="flex flex-col gap-2">

@@ -20,7 +20,7 @@ const levelClass = {
 </script>
 
 <template>
-  <div class="flex flex-col rounded-lg border border-slate-200 bg-slate-50">
+  <div class="flex flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50">
     <div class="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2">
       <span class="text-sm font-medium text-slate-700">
         日志{{ props.serial ? ` (${props.serial})` : '' }}
