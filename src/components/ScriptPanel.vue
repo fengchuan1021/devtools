@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -185,7 +185,7 @@ async function confirmSave() {
   const packageName = selectedApp ? selectedApp.package_name : ''
   const scriptName= selectedApp ? selectedApp.name : name.trim()
   if(!name){
-    name=scriptName;
+    name.value=scriptName;
   }
   if (!name?.trim()) {
     saveError.value = '请输入脚本名称'
@@ -219,7 +219,11 @@ async function confirmSave() {
     saveLoading.value = false
   }
 }
-
+watch(()=>saveForm.value.selectedAppPackageName, (v) => {
+  if (v && !saveForm.value.name) {
+    saveForm.value.name = applications.value.find(a => a.package_name === v)?.name || ''
+  }
+}, { immediate: true })
 onMounted(() => {
   loadCategories()
   loadApplications()
@@ -289,6 +293,18 @@ onMounted(() => {
   >
     <div class="flex flex-col gap-3">
       <div>
+        <label class="block text-sm font-medium mb-1">所属 App</label>
+        <Select
+          v-model="saveForm.selectedAppPackageName"
+          :options="applications"
+          option-label="name"
+          option-value="package_name"
+          placeholder="可选，选择后将使用该 App 的 package_name 与图标"
+          class="w-full"
+          show-clear
+        />
+      </div>
+      <div>
         <label class="block text-sm font-medium mb-1">脚本名称</label>
         <InputText v-model="saveForm.name" placeholder="请输入脚本名称" class="w-full" />
       </div>
@@ -308,18 +324,7 @@ onMounted(() => {
           :disabled="saveForm.newCategory"
         />
       </div>
-      <div>
-        <label class="block text-sm font-medium mb-1">所属 App</label>
-        <Select
-          v-model="saveForm.selectedAppPackageName"
-          :options="applications"
-          option-label="name"
-          option-value="package_name"
-          placeholder="可选，选择后将使用该 App 的 package_name 与图标"
-          class="w-full"
-          show-clear
-        />
-      </div>
+   
       <div class="flex items-center gap-2">
         <Checkbox v-model="saveForm.newCategory" input-id="new-cat" :binary="true" />
         <label for="new-cat" class="text-sm">新建分类</label>
