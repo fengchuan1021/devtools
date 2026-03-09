@@ -175,37 +175,23 @@ function openSaveDialog() {
 
 async function confirmSave() {
   const { name, description, categoryId, newCategory, newCategoryName } = saveForm.value
-  if (!name?.trim()) {
-    saveError.value = '请输入脚本名称'
-    return
-  }
+  
   let categoryIdToUse = categoryId
-  if (newCategory && newCategoryName?.trim()) {
-    saveLoading.value = true
-    saveError.value = ''
-    try {
-      const res = await createScriptCategory({
-        name: newCategoryName.trim(),
-        description: '',
-        is_new: false,
-        is_hot: false,
-        sort_order: 999
-      })
-      categoryIdToUse = res?.data?.id
-      if (categoryIdToUse) scriptCategories.value.push(res.data)
-    } catch (e) {
-      saveError.value = e?.response?.data?.error || e?.message || '新建分类失败'
-      saveLoading.value = false
-      return
-    }
-    saveLoading.value = false
-  }
   if (categoryIdToUse == null || categoryIdToUse === '') {
     saveError.value = '请选择所属分类或新建分类并填写名称'
     return
   }
   const selectedApp = applications.value.find(a => a.package_name === saveForm.value.selectedAppPackageName)
   const packageName = selectedApp ? selectedApp.package_name : ''
+  const scriptName= selectedApp ? selectedApp.name : name.trim()
+  if(!name){
+    name=scriptName;
+  }
+  if (!name?.trim()) {
+    saveError.value = '请输入脚本名称'
+    return
+  }
+
   const iconUrl = selectedApp ? buildIconUrl(selectedApp.icon_path) : ''
 
   const payload = {
