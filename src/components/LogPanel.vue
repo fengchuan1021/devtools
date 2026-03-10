@@ -45,7 +45,14 @@ const levelClass = {
       >
         <span class="shrink-0 text-slate-400">{{ entry.time }}</span>
         <span class="shrink-0 font-medium">{{ entry.level }}</span>
-        <span class="min-w-0 break-words">{{ entry.message }}</span>
+        <span v-if="entry.level === 'image_lib'" class="min-w-0">
+          <img
+            :src="entry.message"
+            alt="image_lib log image"
+            class="max-w-full max-h-40 rounded border border-slate-200 object-contain"
+          />
+        </span>
+        <span v-else class="min-w-0 break-words">{{ entry.message }}</span>
       </div>
       <div
         v-if="entries.length === 0"
