@@ -13,16 +13,20 @@ import { useDeviceStore } from '../stores/device'
 import { getScriptCategories, createScriptCategory, createScript, updateScript, getScriptsTree, getScript } from '../api/script'
 import { getApplications } from '../api/application'
 import { runDevScript } from '../api/device'
+import * as monaco from 'monaco-editor'
+import { registerQuickJSCompletions } from '../utils/quickjsCompletions'
 import ScriptCategoryManagerView from './ScriptCategoryManagerView.vue'
 import ScriptManagerView from './ScriptManagerView.vue'
 
-const code = ref(`// 在此编写 JavaScript 脚本
-function hello() {
-  console.log('Hello, 脚本引擎!');
+let quickJSCompletionsRegistered = false
+function ensureQuickJSCompletions() {
+  if (!quickJSCompletionsRegistered) {
+    registerQuickJSCompletions(monaco)
+    quickJSCompletionsRegistered = true
+  }
 }
 
-hello();
-`)
+const code = ref(`loadScript("/go_scripts/common.js");`)
 
 const editorOptions = {
   fontSize: 14,
@@ -278,6 +282,7 @@ onMounted(() => {
             theme="vs-dark"
             :options="editorOptions"
             height="100%"
+            @editor-did-mount="ensureQuickJSCompletions"
           />
         </div>
       </div>
