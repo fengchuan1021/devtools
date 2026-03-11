@@ -29,7 +29,7 @@ export function useWebSocket(deviceOrSerialRef) {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = location.host
     const token = getItem('token') || ''
-    const url = `${protocol}//${host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    const url = `${protocol}//${host}/api/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
     ws = new WebSocket(url)
 
     ws.onopen = () => {
