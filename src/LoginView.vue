@@ -71,6 +71,11 @@ async function handleLogin() {
     const res = await login(username.value, password.value)
     const { token, user } = res?.data ?? {}
     setItem('token', token)
+    if(token){
+    try {
+          const result = JSON.parse(window.AndroidBridge.setToken(token))
+        } catch {}
+      }
     if (user) {
       userStore.setUser(user)
     }

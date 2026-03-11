@@ -13,6 +13,7 @@ export const useUserStore = defineStore('user', {
     setUser(user) {
       this.user = user
       if (user) {
+       
         try {
           localStorage.setItem('user', JSON.stringify(user))
         } catch {}
