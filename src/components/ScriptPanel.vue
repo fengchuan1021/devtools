@@ -26,7 +26,7 @@ function ensureQuickJSCompletions() {
   }
 }
 
-const code = ref(`loadScript("/go_scripts/common.js");`)
+const code = ref(`loadScript("/common.js");`)
 
 const editorOptions = {
   fontSize: 14,
