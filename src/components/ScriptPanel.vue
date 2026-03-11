@@ -68,6 +68,7 @@ const saveForm = ref({
   categoryId: null,
   newCategory: false,
   newCategoryName: '',
+  file_path:'',
   selectedAppPackageName: null
 })
 const saveLoading = ref(false)
@@ -171,6 +172,7 @@ function openSaveDialog() {
     categoryId: fromLoaded != null && fromLoaded.category_id != null ? fromLoaded.category_id : null,
     newCategory: false,
     newCategoryName: '',
+    file_path: fromLoaded?.file_path ?? '',
     selectedAppPackageName: fromLoaded?.package_name || null
   }
   saveError.value = ''
@@ -178,7 +180,7 @@ function openSaveDialog() {
 }
 
 async function confirmSave() {
-  const { name, description, categoryId, newCategory, newCategoryName } = saveForm.value
+  const { name, description, categoryId, newCategory, newCategoryName,file_path } = saveForm.value
   
   let categoryIdToUse = categoryId
   if (categoryIdToUse == null || categoryIdToUse === '') {
@@ -204,7 +206,8 @@ async function confirmSave() {
     category_id: categoryIdToUse,
     content: code.value,
     package_name: packageName,
-    icon_url: iconUrl
+    icon_url: iconUrl,
+    file_path: file_path
   }
 
   saveLoading.value = true
@@ -330,10 +333,16 @@ onMounted(() => {
         />
       </div>
    
-      <div class="flex items-center gap-2">
+      <!-- <div class="flex items-center gap-2">
         <Checkbox v-model="saveForm.newCategory" input-id="new-cat" :binary="true" />
         <label for="new-cat" class="text-sm">新建分类</label>
+      </div> -->
+      <div>
+        <label class="block text-sm font-medium mb-1">文件路径</label>
+        <InputText v-model="saveForm.file_path" placeholder="输入文件路径" class="w-full" />
+
       </div>
+   
       <div v-if="saveForm.newCategory">
         <label class="block text-sm font-medium mb-1">新分类名称</label>
         <InputText v-model="saveForm.newCategoryName" placeholder="输入新分类名称" class="w-full" />
