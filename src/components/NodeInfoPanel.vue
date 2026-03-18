@@ -331,7 +331,7 @@ watch(
                 <dt class="w-28 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">
                   {{ entry.key }}
                 </dt>
-                <dd class="min-w-0 flex-1 break-all font-normal text-slate-900">
+                <dd style="display:inline;" class="min-w-0 flex-1 break-all font-normal text-slate-900">
                   {{ entry.value }}
                 </dd>
                 <button
