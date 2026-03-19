@@ -7,6 +7,13 @@
     <title>devtools</title>
   </head>
   <body>
+    <script>
+      document.addEventListener('copy', function (e) {
+    const text = window.getSelection().toString().trim();
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
+});
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
