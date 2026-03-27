@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch,onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDeviceStore } from '../stores/device'
 import { getXmlLayout } from '../api/device'
@@ -12,7 +12,11 @@ const props = defineProps({
     default: '',
   },
 })
+onMounted(()=>{
 
+ 
+ 
+})
 const deviceStore = useDeviceStore()
 const { screenshotRefreshKey, selectedPoint, containingNodesBounds } = storeToRefs(deviceStore)
 
@@ -241,6 +245,13 @@ async function copyValueToClipboard(key,text) {
   }
 }
 
+function copyEntryValueWithoutNewline(e, value) {
+  console.log("on copy")
+  const normalized = String(value ?? '').replace(/\r?\n/g, '')
+  e.clipboardData?.setData('text/plain', normalized)
+  e.preventDefault()
+}
+
 const nodeInfoEntries = computed(() => {
   const node = selectedNode.value
   if (!node) return []
@@ -299,6 +310,7 @@ watch(
   
     <template #content>
       <div
+        id="node-info-panel"
         class="flex min-h-[300px] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-3"
       >
         <template v-if="!serial">
@@ -325,15 +337,19 @@ watch(
             点击坐标：<code class="rounded bg-slate-200 px-1">{{ selectedPoint.x }}, {{ selectedPoint.y }}</code>
             （最内层节点）
           </p>
-          <dl class="mb-4 space-y-1.5 text-sm">
+          <div class="mb-4 space-y-1.5 text-sm">
             <template v-for="entry in nodeInfoEntries" :key="entry.key">
               <div class="flex items-center gap-x-2">
-                <dt class="w-28 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">
+                <label class="w-28 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">
                   {{ entry.key }}
-                </dt>
-                <dd style="display:inline;" class="min-w-0 flex-1 break-all font-normal text-slate-900">
+                </label>
+                <span
+                  style="display:inline;"
+                  class="min-w-0 flex-1 break-all font-normal text-slate-900"
+                  @copy="copyEntryValueWithoutNewline($event, entry.value)"
+                >
                   {{ entry.value }}
-                </dd>
+                </span>
                 <button
                   type="button"
                   class="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
@@ -344,7 +360,7 @@ watch(
                 </button>
               </div>
             </template>
-          </dl>
+          </div>
           <div v-if="xmlTree" class="min-h-0 flex-1 flex flex-col overflow-hidden">
             <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">XML 层级</p>
             <div class="min-h-0 flex-1 overflow-y-auto rounded border border-slate-200 bg-white py-1 text-sm">
