@@ -6,6 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   base: process.env.NODE_ENV === 'production' ? '/images/dev/' : '/',
   plugins: [vue(), tailwindcss()],
+  build: {
+    outDir: '/root/scorpio/antares_assets/images/dev',
+  },
   server: {
     port: 5174,
     proxy: {
