@@ -6,7 +6,7 @@ const BASE_URL = import.meta.env.VITE_API_BASE || ''
 export function redirectToLogin() {
   removeItem('token')
   removeItem('user')
-  window.location.href = '/login'
+  window.location.href = `${window.location.pathname}${window.location.search}#/login`
 }
 
 async function request(url, options = {}) {
