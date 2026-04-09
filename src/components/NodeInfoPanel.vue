@@ -246,10 +246,25 @@ async function copyValueToClipboard(key,text) {
 }
 
 function copyEntryValueWithoutNewline(e, value) {
-  console.log("on copy")
+  if (e.defaultPrevented) return
   const normalized = String(value ?? '').replace(/\r?\n/g, '')
   e.clipboardData?.setData('text/plain', normalized)
   e.preventDefault()
+}
+
+function getClosestCopyValueElement(node) {
+  if (!node) return null
+  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
+  return el?.closest?.('[data-copy-value]') || null
+}
+
+function copySelectionValueWithoutNewline(e) {
+  const selection = window.getSelection?.()
+  if (!selection || !selection.rangeCount) return
+  const anchorEl = getClosestCopyValueElement(selection.anchorNode)
+  const focusEl = getClosestCopyValueElement(selection.focusNode)
+  if (!anchorEl || anchorEl !== focusEl) return
+  copyEntryValueWithoutNewline(e, anchorEl.getAttribute('data-copy-value') ?? '')
 }
 
 const nodeInfoEntries = computed(() => {
@@ -312,6 +327,7 @@ watch(
       <div
         id="node-info-panel"
         class="flex min-h-[300px] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-3"
+        @copy.capture="copySelectionValueWithoutNewline"
       >
         <template v-if="!serial">
           <span class="text-slate-400">请先选择设备</span>
@@ -346,7 +362,7 @@ watch(
                 <span
                   style="display:inline;"
                   class="min-w-0 flex-1 break-all font-normal text-slate-900"
-                  @copy="copyEntryValueWithoutNewline($event, entry.value)"
+                  :data-copy-value="entry.value"
                 >
                   {{ entry.value }}
                 </span>
