@@ -360,9 +360,10 @@ watch(
                   {{ entry.key }}
                 </label>
                 <span
-                  style="display:inline;"
-                  class="min-w-0 flex-1 break-all font-normal text-slate-900"
-                  :data-copy-value="entry.value"
+                  style="display:inline;  white-space: nowrap;margin-left:20px;"
+                  class="min-w-0 font-normal text-slate-900"
+                  
+                 
                 >
                   {{ entry.value }}
                 </span>
