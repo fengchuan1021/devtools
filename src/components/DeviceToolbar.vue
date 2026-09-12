@@ -105,5 +105,11 @@ onBeforeUnmount(async () => {
         @click="isscrcpy = !isscrcpy"
       >scrcpy</span>
     </div>
+    <Button
+      icon="pi pi-desktop"
+      label="终端"
+      severity="secondary"
+      @click="deviceStore.openTerminal()"
+    />
   </div>
 </template>

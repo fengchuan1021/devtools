@@ -95,3 +95,19 @@ export async function sendScrcpyCmd(serial, cmdtype) {
   const params = new URLSearchParams({ serial, cmdtype })
   return request.post(`/api/dev/sendScrcpyCmd?${params}`, {})
 }
+
+/**
+ * 在设备上以 root 执行 shell，返回 stdout+stderr
+ * @param {string} serial
+ * @param {string} command
+ * @returns {Promise<string>}
+ */
+export async function runDeviceShell(serial, command) {
+  if (!serial?.trim()) throw new Error('serial 必填')
+  if (command == null || command === '') throw new Error('command 必填')
+  const res = await request.post('/api/dev/runShell', {
+    serial: serial.trim(),
+    command: String(command),
+  })
+  return res?.data ?? ''
+}

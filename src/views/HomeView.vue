@@ -9,6 +9,7 @@ import DeviceToolbar from '../components/DeviceToolbar.vue'
 import NodeInfoPanel from '../components/NodeInfoPanel.vue'
 import ScriptPanel from '../components/ScriptPanel.vue'
 import LogPanel from '../components/LogPanel.vue'
+import DeviceTerminalHost from '../components/DeviceTerminalHost.vue'
 
 const deviceStore = useDeviceStore()
 const { selectedDevice, isscrcpy, selectedSerial } = storeToRefs(deviceStore)
@@ -40,5 +41,6 @@ onMounted(() => {
         <LogPanel :serial="selectedSerial" />
       </aside>
     </div>
+    <DeviceTerminalHost />
   </div>
 </template>

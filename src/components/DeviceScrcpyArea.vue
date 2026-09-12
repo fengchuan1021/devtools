@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useDeviceStore } from '../stores/device'
 import { getItem } from '../utils/storage'
 import { createScrcpyPlayer } from '../composables/useScrcpyPlayer'
+import { createScrcpyControl } from '../composables/useScrcpyControl'
 import Card from 'primevue/card'
 
 const props = defineProps({
@@ -31,6 +32,7 @@ const statusText = computed(() => {
 
 let ws = null
 let player = null
+let control = null
 let reconnectTimer = null
 
 function disconnect() {
@@ -50,6 +52,7 @@ function disconnect() {
     player.dispose()
     player = null
   }
+  control = null
 }
 
 function connect() {
@@ -81,6 +84,15 @@ function connect() {
   ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
 
+  control = createScrcpyControl({
+    send: (buf) => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(buf)
+    },
+    getCanvas: () => canvasRef.value,
+    getSize: () => videoSize.value,
+    onPoint: (point) => deviceStore.setSelectedPoint(point),
+  })
+
   ws.onopen = () => {
     status.value = 'waiting'
   }
@@ -101,14 +113,23 @@ function connect() {
   }
 }
 
-function onCanvasClick(e) {
-  const canvas = canvasRef.value
-  if (!canvas || !canvas.width || !canvas.height) return
-  const rect = canvas.getBoundingClientRect()
-  if (!rect.width || !rect.height) return
-  const x = ((e.clientX - rect.left) / rect.width) * canvas.width
-  const y = ((e.clientY - rect.top) / rect.height) * canvas.height
-  deviceStore.setSelectedPoint({ x, y })
+function onPointerDown(e) {
+  control?.onPointerDown(e)
+}
+function onPointerMove(e) {
+  control?.onPointerMove(e)
+}
+function onPointerUp(e) {
+  control?.onPointerUp(e)
+}
+function onPointerCancel(e) {
+  control?.onPointerCancel(e)
+}
+function onWheel(e) {
+  control?.onWheel(e)
+}
+function onContextMenu(e) {
+  control?.onContextMenu(e)
 }
 
 watch(
@@ -143,8 +164,13 @@ onBeforeUnmount(disconnect)
             >
               <canvas
                 ref="canvasRef"
-                class="block h-full w-full cursor-crosshair object-contain"
-                @click="onCanvasClick"
+                class="block h-full w-full cursor-default object-contain touch-none"
+                @pointerdown="onPointerDown"
+                @pointermove="onPointerMove"
+                @pointerup="onPointerUp"
+                @pointercancel="onPointerCancel"
+                @wheel.prevent="onWheel"
+                @contextmenu.prevent="onContextMenu"
               />
               <svg
                 v-if="videoSize.width && videoSize.height && containingNodesBounds.length"

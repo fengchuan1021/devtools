@@ -19,6 +19,8 @@ export const useDeviceStore = defineStore('device', {
     containingNodesBounds: [],
     /** 是否用 scrcpy 实时画面替代静态截图 */
     isscrcpy: false,
+    /** 已打开的设备终端窗口 */
+    terminals: [],
   }),
 
   getters: {
@@ -88,6 +90,19 @@ export const useDeviceStore = defineStore('device', {
 
     setIsScrcpy(value) {
       this.isscrcpy = !!value
+    },
+
+    openTerminal() {
+      const serial = this.selectedSerial
+      this.terminals.push({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        serial,
+        visible: true,
+      })
+    },
+
+    closeTerminal(id) {
+      this.terminals = this.terminals.filter((t) => t.id !== id)
     },
 
     /** 设置截图上的点击坐标，用于在 NodeInfoPanel 中展示对应 xmllayout 节点 */
