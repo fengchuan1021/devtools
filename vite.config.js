@@ -15,6 +15,7 @@ export default defineConfig({
       '/api': {
         target: 'http://192.168.1.234:80',
         changeOrigin: true,
+        ws: true,
       },
       '/ws': {
         target: 'http://192.168.1.234:80',

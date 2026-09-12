@@ -17,7 +17,17 @@ export const useDeviceStore = defineStore('device', {
     selectedPoint: null,
     /** 包含点击点的所有节点的 bounds 列表，用于在截图上绘制矩形 [{ left, top, right, bottom, width, height }, ...] */
     containingNodesBounds: [],
+    /** 是否用 scrcpy 实时画面替代静态截图 */
+    isscrcpy: false,
   }),
+
+  getters: {
+    selectedSerial(state) {
+      const device = state.selectedDevice
+      if (!device) return ''
+      return typeof device === 'string' ? device : (device.serial || '')
+    },
+  },
 
   actions: {
     /**
@@ -74,6 +84,10 @@ export const useDeviceStore = defineStore('device', {
     /** 刷新设备截图 */
     refreshScreenshot() {
       this.screenshotRefreshKey += 1
+    },
+
+    setIsScrcpy(value) {
+      this.isscrcpy = !!value
     },
 
     /** 设置截图上的点击坐标，用于在 NodeInfoPanel 中展示对应 xmllayout 节点 */

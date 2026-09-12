@@ -83,3 +83,15 @@ export async function getXmlLayout(serial) {
   const url = `/api/dev/getXmlLayout?${new URLSearchParams({ serial })}`
   return request.getText(url)
 }
+
+/**
+ * 开始 / 结束设备上的 scrcpy
+ * @param {string} serial
+ * @param {'beginScrcpy'|'endScrcpy'} cmdtype
+ */
+export async function sendScrcpyCmd(serial, cmdtype) {
+  if (!serial) throw new Error('serial required')
+  if (!cmdtype) throw new Error('cmdtype required')
+  const params = new URLSearchParams({ serial, cmdtype })
+  return request.post(`/api/dev/sendScrcpyCmd?${params}`, {})
+}
