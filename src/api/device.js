@@ -3,6 +3,7 @@
  */
 
 import request from '../utils/request'
+import { getItem } from '../utils/storage'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -70,7 +71,9 @@ export async function fetchScreenShot(serial) {
 export async function runDevScript(serial, script) {
   if (!serial?.trim()) throw new Error('serial 必填')
   if (script == null) throw new Error('script 必填')
+    console.log('run script', serial)
   const res = await request.post('/api/dev/runDevScript', { serial: serial.trim(), script: String(script) })
+  console.log('run script res', res)
   return res
 }
 /**
@@ -110,4 +113,70 @@ export async function runDeviceShell(serial, command) {
     command: String(command),
   })
   return res?.data ?? ''
+}
+
+/**
+ * 操作设备交互式 PTY 会话
+ * @param {'open'|'write'|'interrupt'|'close'} op
+ */
+export async function runDeviceShellSession(serial, session, op, data = '', seq = 0) {
+  if (!serial?.trim()) throw new Error('serial 必填')
+  if (!session?.trim()) throw new Error('session 必填')
+  if (!op) throw new Error('op 必填')
+  const res = await request.post('/api/dev/shell', {
+    serial: serial.trim(),
+    session: String(session),
+    op,
+    data: data == null ? '' : String(data),
+    seq: Number(seq) || 0,
+  })
+  return res?.data ?? ''
+}
+
+/**
+ * 订阅 PTY 输出（SSE）。token 走 header，需浏览器 ReadableStream。
+ * @returns {Promise<void>}
+ */
+export async function openDeviceShellStream(serial, session, { onEvent, signal } = {}) {
+  if (!serial?.trim()) throw new Error('serial 必填')
+  if (!session?.trim()) throw new Error('session 必填')
+  const headers = {}
+  const token = getItem('token') || ''
+  if (token) headers.token = token
+  headers.Accept = 'text/event-stream'
+  const params = new URLSearchParams({ serial: serial.trim(), session: String(session) })
+  const res = await fetch(`/api/dev/shellStream?${params}`, {
+    headers,
+    signal,
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data?.error || data?.msg || '订阅终端输出失败')
+  }
+  if (!res.body) throw new Error('浏览器不支持流式输出')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (!signal?.aborted) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    buf = buf.replace(/\r\n/g, '\n')
+    let idx
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).replace(/^\s/, '')
+        if (!payload) continue
+        try {
+          onEvent?.(JSON.parse(payload))
+        } catch {
+          // ignore malformed frames
+        }
+      }
+    }
+  }
 }

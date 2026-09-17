@@ -31,6 +31,6 @@ function onHide(id) {
         <span>终端 {{ term.serial || '未选择设备' }}</span>
       </div>
     </template>
-    <DeviceTerminal :serial="term.serial" @close="onHide(term.id)" />
+    <DeviceTerminal :serial="term.serial" :session="term.id" @close="onHide(term.id)" />
   </Dialog>
 </template>

@@ -41,14 +41,17 @@ const runScriptLoading = ref(false)
 const runScriptMessage = ref('')
 
 const runScript = async () => {
+  
   const serial = selectedDevice.value?.serial
   if (!serial) {
+    console.log('no serial')
     runScriptMessage.value = '请先选择设备'
     return
   }
   runScriptMessage.value = ''
   //runScriptLoading.value = true
   try {
+    console.log('run1 script', code.value)
     const res = await runDevScript(serial, code.value)
     const data = res?.data ?? ''
     runScriptMessage.value = data ? `执行结果: ${data}` : '已下发执行'
