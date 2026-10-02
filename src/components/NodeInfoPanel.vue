@@ -1,28 +1,35 @@
-<script setup>
-import { computed, ref, watch,onMounted } from 'vue'
+<script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { useDeviceStore } from '../stores/device'
-import { getXmlLayout } from '../api/device'
 import Card from 'primevue/card'
+import { computed, ref, watch } from 'vue'
+import { getXmlLayout } from '../api/device'
+import { useDeviceStore, type NodeBounds } from '../stores/device'
 
-const props = defineProps({
-  /** 选中的设备序列号 */
-  serial: {
-    type: String,
-    default: '',
-  },
-})
-onMounted(()=>{
+const props = defineProps<{
+  serial?: string
+}>()
 
- 
- 
-})
 const deviceStore = useDeviceStore()
 const { screenshotRefreshKey, selectedPoint, containingNodesBounds } = storeToRefs(deviceStore)
 
 const xmllayout = ref('')
 const loading = ref(false)
 const error = ref('')
+
+interface XmlAttrs {
+  [key: string]: string
+}
+
+interface XmlTreeNode {
+  bounds: NodeBounds | null
+  attrs: XmlAttrs
+  children: XmlTreeNode[]
+  key: string
+}
+
+function errorText(reason: unknown, fallback: string) {
+  return reason instanceof Error && reason.message ? reason.message : fallback
+}
 
 async function loadXmlLayout() {
   if (!props.serial) {
@@ -34,78 +41,69 @@ async function loadXmlLayout() {
   error.value = ''
   try {
     xmllayout.value = await getXmlLayout(props.serial)
-  } catch (e) {
-    error.value = e.message || '获取布局失败'
+  } catch (reason) {
+    error.value = errorText(reason, '获取布局失败')
     xmllayout.value = ''
   } finally {
     loading.value = false
   }
 }
 
-/** 解析 bounds 字符串 "[left,top][right,bottom]" */
-function parseBounds(boundsStr) {
-  if (!boundsStr || typeof boundsStr !== 'string') return null
-  const m = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/)
-  if (!m) return null
-  return {
-    left: parseInt(m[1], 10),
-    top: parseInt(m[2], 10),
-    right: parseInt(m[3], 10),
-    bottom: parseInt(m[4], 10),
-    width: parseInt(m[3], 10) - parseInt(m[1], 10),
-    height: parseInt(m[4], 10) - parseInt(m[2], 10),
-  }
+function parseBounds(boundsStr: string | null) {
+  if (!boundsStr) return null
+  const matched = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/)
+  if (!matched) return null
+  const left = parseInt(matched[1] ?? '', 10)
+  const top = parseInt(matched[2] ?? '', 10)
+  const right = parseInt(matched[3] ?? '', 10)
+  const bottom = parseInt(matched[4] ?? '', 10)
+  return { left, top, right, bottom, width: right - left, height: bottom - top }
 }
 
-/** 在 XML 中查找包含 (x,y) 的所有 node，按面积从小到大排序，返回 { bounds, attrs } 数组 */
-function findAllNodesAtPoint(xmlString, x, y) {
+function readAttrs(el: Element) {
+  const attrs: XmlAttrs = {}
+  for (const attr of el.attributes) attrs[attr.name] = attr.value
+  return attrs
+}
+
+function findAllNodesAtPoint(xmlString: string, x: number, y: number) {
   if (!xmlString || typeof x !== 'number' || typeof y !== 'number') return []
-  let doc
+  let doc: Document
   try {
     doc = new DOMParser().parseFromString(xmlString, 'text/xml')
   } catch {
     return []
   }
-  const nodes = doc.querySelectorAll('node')
-  const containing = []
-  for (const el of nodes) {
-    const boundsStr = el.getAttribute('bounds')
-    const b = parseBounds(boundsStr)
-    if (!b) continue
-    if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) {
-      const area = b.width * b.height
-      const attrs = {}
-      for (const a of el.attributes) {
-        attrs[a.name] = a.value
-      }
-      containing.push({ area, bounds: b, attrs })
+  const containing: { area: number; bounds: NodeBounds; attrs: XmlAttrs }[] = []
+  for (const el of doc.querySelectorAll('node')) {
+    const bounds = parseBounds(el.getAttribute('bounds'))
+    if (!bounds) continue
+    if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
+      containing.push({ area: bounds.width * bounds.height, bounds, attrs: readAttrs(el) })
     }
   }
   containing.sort((a, b) => a.area - b.area)
   return containing.map((item) => ({ bounds: item.bounds, attrs: item.attrs }))
 }
 
-/** 在 XML 字符串中查找包含 (x,y) 的最内层 node（面积最小的），返回其属性 */
-function findNodeAtPoint(xmlString, x, y) {
+function findNodeAtPoint(xmlString: string, x: number, y: number) {
   const all = findAllNodesAtPoint(xmlString, x, y)
-  return all.length ? all[0].attrs : null
+  return all.length ? all[0]?.attrs ?? null : null
 }
 
-/** bounds 唯一键，用于树节点匹配与展开状态 */
-function boundsKey(b) {
-  if (!b) return ''
-  return `${b.left},${b.top},${b.right},${b.bottom}`
+function boundsKey(bounds: NodeBounds | null) {
+  if (!bounds) return ''
+  return `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`
 }
 
-function boundsEqual(a, b) {
+function boundsEqual(a: NodeBounds | null, b: NodeBounds | null) {
   if (!a || !b) return false
   return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom
 }
 
-/** 将 XML 解析为树结构 */
-function buildXmlTree(xmlString) {
-  if (!xmlString || typeof xmlString !== 'string') return null
-  let doc
+function buildXmlTree(xmlString: string): XmlTreeNode | null {
+  if (!xmlString) return null
+  let doc: Document
   try {
     doc = new DOMParser().parseFromString(xmlString, 'text/xml')
   } catch {
@@ -114,22 +112,17 @@ function buildXmlTree(xmlString) {
   const root = doc.documentElement?.tagName === 'node' ? doc.documentElement : doc.querySelector('node')
   if (!root) return null
 
-  function buildNode(el) {
-    const boundsStr = el.getAttribute('bounds')
-    const bounds = parseBounds(boundsStr)
-    const attrs = {}
-    for (const a of el.attributes) {
-      attrs[a.name] = a.value
-    }
-    const childEls = Array.from(el.children).filter((c) => c.tagName === 'node')
-    const children = childEls.map((c) => buildNode(c))
-    return { bounds, attrs, children, key: bounds ? boundsKey(bounds) : '' }
+  function buildNode(el: Element): XmlTreeNode {
+    const bounds = parseBounds(el.getAttribute('bounds'))
+    const children = Array.from(el.children)
+      .filter((child) => child.tagName === 'node')
+      .map((child) => buildNode(child))
+    return { bounds, attrs: readAttrs(el), children, key: bounds ? boundsKey(bounds) : '' }
   }
   return buildNode(root)
 }
 
-/** 在树中查找从根到目标 bounds 的路径 */
-function findPathToBounds(node, targetBounds, path = []) {
+function findPathToBounds(node: XmlTreeNode | null, targetBounds: NodeBounds | null, path: XmlTreeNode[] = []): XmlTreeNode[] | null {
   if (!node || !targetBounds) return null
   const nextPath = [...path, node]
   if (boundsEqual(node.bounds, targetBounds)) return nextPath
@@ -140,14 +133,15 @@ function findPathToBounds(node, targetBounds, path = []) {
   return null
 }
 
-/** 树节点简短标签（优先 class、text、resource-id） */
-function nodeLabel(node) {
+function nodeLabel(node: XmlTreeNode | null) {
   if (!node?.attrs) return 'node'
-  const a = node.attrs
-  if (a['resource-id']) return a['resource-id'].split('/').pop() || a['resource-id']
-  if (a['class']) return a['class'].split('.').pop() || a['class']
-  if (a['text']) return (a['text'].slice(0, 20) + (a['text'].length > 20 ? '…' : '')) || 'node'
-  if (a['content-desc']) return (a['content-desc'].slice(0, 20) + (a['content-desc'].length > 20 ? '…' : '')) || 'node'
+  const attrs = node.attrs
+  if (attrs['resource-id']) return attrs['resource-id'].split('/').pop() || attrs['resource-id']
+  if (attrs.class) return attrs.class.split('.').pop() || attrs.class
+  if (attrs.text) return attrs.text.slice(0, 20) + (attrs.text.length > 20 ? '…' : '') || 'node'
+  if (attrs['content-desc']) {
+    return attrs['content-desc'].slice(0, 20) + (attrs['content-desc'].length > 20 ? '…' : '') || 'node'
+  }
   return 'node'
 }
 
@@ -157,21 +151,15 @@ const selectedNode = computed(() => {
   return findNodeAtPoint(xmllayout.value, point.x, point.y)
 })
 
-/** 当前选中的节点 bounds（最内层，用于树定位） */
 const selectedBounds = computed(() => {
   const list = containingNodesBounds.value
   return list?.length ? list[0] : null
 })
 
-/** XML 树结构 */
 const xmlTree = computed(() => buildXmlTree(xmllayout.value))
+const expandedKeys = ref(new Set<string>())
+const selectedNodeRowRef = ref<HTMLElement | null>(null)
 
-/** 树展开的节点 key 集合 */
-const expandedKeys = ref(new Set())
-/** 选中节点行 ref，用于 scrollIntoView */
-const selectedNodeRowRef = ref(null)
-
-/** 当选中节点变化时，展开路径并滚动到该节点 */
 function expandPathAndScrollToSelected() {
   const tree = xmlTree.value
   const bounds = selectedBounds.value
@@ -179,7 +167,7 @@ function expandPathAndScrollToSelected() {
   const path = findPathToBounds(tree, bounds)
   if (path) {
     const keys = new Set(expandedKeys.value)
-    path.forEach((n) => n.key && keys.add(n.key))
+    path.forEach((node) => node.key && keys.add(node.key))
     expandedKeys.value = keys
   }
   setTimeout(() => {
@@ -187,84 +175,73 @@ function expandPathAndScrollToSelected() {
   }, 50)
 }
 
-function toggleExpand(key) {
+function toggleExpand(key: string) {
   const next = new Set(expandedKeys.value)
   if (next.has(key)) next.delete(key)
   else next.add(key)
   expandedKeys.value = next
 }
 
-/** 点击树节点时，截图上只绘制该节点的矩形 */
-function selectTreeNodeBounds(node) {
+function selectTreeNodeBounds(node: XmlTreeNode) {
   deviceStore.setContainingNodesBounds(node?.bounds ? [node.bounds] : [])
 }
 
-/** 选中的 bounds 的 key，用于高亮树行 */
 const selectedBoundsKey = computed(() => (selectedBounds.value ? boundsKey(selectedBounds.value) : ''))
 
-/** 按展开状态扁平化的树节点列表（用于渲染） */
 const flattenedTree = computed(() => {
   const tree = xmlTree.value
   const expanded = expandedKeys.value
   if (!tree) return []
-  const out = []
-  function walk(n, depth) {
-    if (!n) return
-    out.push({ node: n, depth })
-    if (n.children?.length && (depth === 0 || expanded.has(n.key))) {
-      n.children.forEach((c) => walk(c, depth + 1))
+  const out: { node: XmlTreeNode; depth: number }[] = []
+  function walk(node: XmlTreeNode | null, depth: number) {
+    if (!node) return
+    out.push({ node, depth })
+    if (node.children?.length && (depth === 0 || expanded.has(node.key))) {
+      node.children.forEach((child) => walk(child, depth + 1))
     }
   }
   walk(tree, 0)
   return out
 })
 
-async function copyValueToClipboard(key,text) {
-  try {
-    let txt='';
-    console.log(key);
-    if(key==='class'){
-      txt='className("'+text+'")'
-    }
-    else if(key==='text'){
-      txt='text("'+text+'")'
-    }
-    else if(key==='content-desc'){
-      txt='desc("'+text+'")'
-    }
-    else if(key==='resource-id'){
-      txt='id("'+text+'")'
-    }
-    else{
-      txt=text
-    }
- 
-    await navigator.clipboard.writeText(txt)
-  } catch {
-    // 降级：部分环境无 clipboard API
+function trackSelectedRow(key: string, el: unknown) {
+  if (key === selectedBoundsKey.value && el instanceof HTMLElement) {
+    selectedNodeRowRef.value = el
   }
 }
 
-function copyEntryValueWithoutNewline(e, value) {
-  if (e.defaultPrevented) return
-  const normalized = String(value ?? '').replace(/\r?\n/g, '')
-  e.clipboardData?.setData('text/plain', normalized)
-  e.preventDefault()
+async function copyValueToClipboard(key: string, text: string) {
+  let value = text
+  if (key === 'class') value = `className("${text}")`
+  else if (key === 'text') value = `text("${text}")`
+  else if (key === 'content-desc') value = `desc("${text}")`
+  else if (key === 'resource-id') value = `id("${text}")`
+  try {
+    await navigator.clipboard.writeText(value)
+  } catch {
+    // 部分环境没有剪贴板权限
+  }
 }
 
-function getClosestCopyValueElement(node) {
+function copyEntryValueWithoutNewline(event: ClipboardEvent, value: string) {
+  if (event.defaultPrevented) return
+  event.clipboardData?.setData('text/plain', String(value ?? '').replace(/\r?\n/g, ''))
+  event.preventDefault()
+}
+
+function getClosestCopyValueElement(node: Node | null) {
   if (!node) return null
-  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
-  return el?.closest?.('[data-copy-value]') || null
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
+  return el?.closest?.('[data-copy-value]') ?? null
 }
 
-function copySelectionValueWithoutNewline(e) {
+function copySelectionValueWithoutNewline(event: ClipboardEvent) {
   const selection = window.getSelection?.()
   if (!selection || !selection.rangeCount) return
   const anchorEl = getClosestCopyValueElement(selection.anchorNode)
   const focusEl = getClosestCopyValueElement(selection.focusNode)
   if (!anchorEl || anchorEl !== focusEl) return
-  copyEntryValueWithoutNewline(e, anchorEl.getAttribute('data-copy-value') ?? '')
+  copyEntryValueWithoutNewline(event, anchorEl.getAttribute('data-copy-value') ?? '')
 }
 
 const nodeInfoEntries = computed(() => {
@@ -289,14 +266,10 @@ const nodeInfoEntries = computed(() => {
     'visible-to-user',
     'index',
   ]
-  return order.filter((k) => node[k] != null).map((k) => ({ key: k, value: node[k] }))
+  return order.filter((key) => node[key] != null).map((key) => ({ key, value: node[key] ?? '' }))
 })
 
-watch(
-  [() => props.serial, screenshotRefreshKey],
-  () => loadXmlLayout(),
-  { immediate: true }
-)
+watch([() => props.serial, screenshotRefreshKey], () => loadXmlLayout(), { immediate: true })
 
 watch(
   [selectedPoint, xmllayout],
@@ -310,93 +283,81 @@ watch(
     const list = findAllNodesAtPoint(xml, point.x, point.y)
     deviceStore.setContainingNodesBounds(list.map((item) => item.bounds))
   },
-  { immediate: true }
+  { immediate: true },
 )
 
-watch(
-  [selectedBounds, xmlTree],
-  () => expandPathAndScrollToSelected(),
-  { immediate: true }
-)
+watch([selectedBounds, xmlTree], () => expandPathAndScrollToSelected(), { immediate: true })
 </script>
 
 <template>
-  <Card class="h-full">
-  
+  <Card
+    class="flex h-full min-h-0 flex-col [&_.p-card-body]:flex [&_.p-card-body]:min-h-0 [&_.p-card-body]:flex-1 [&_.p-card-body]:flex-col [&_.p-card-content]:flex [&_.p-card-content]:min-h-0 [&_.p-card-content]:flex-1 [&_.p-card-content]:flex-col"
+  >
     <template #content>
       <div
         id="node-info-panel"
-        class="flex min-h-[300px] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-3"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden"
         @copy.capture="copySelectionValueWithoutNewline"
       >
         <template v-if="!serial">
-          <span class="text-slate-400">请先选择设备</span>
+          <span class="text-sm text-muted-color">请先选择设备</span>
         </template>
         <template v-else-if="loading">
-          <i class="pi pi-spin pi-spinner mb-2 text-2xl text-slate-400"></i>
-          <span class="text-slate-400">加载布局中...</span>
+          <i class="pi pi-spin pi-spinner mb-2 text-2xl text-muted-color" />
+          <span class="text-sm text-muted-color">加载布局中...</span>
         </template>
         <template v-else-if="error">
-          <span class="text-red-500">{{ error }}</span>
+          <span class="text-sm text-red-400">{{ error }}</span>
         </template>
         <template v-else-if="!selectedPoint">
-          <span class="text-slate-500">点击左侧设备截图中的位置，将在此显示包裹该点的 xmllayout 节点信息。</span>
+          <span class="text-sm text-muted-color">点击左侧设备截图中的位置，将在此显示包裹该点的节点信息。</span>
         </template>
         <template v-else-if="!selectedNode">
-          <p class="mb-2 text-slate-600">
-            点击坐标：<code class="rounded bg-slate-200 px-1">{{ selectedPoint.x }}, {{ selectedPoint.y }}</code>
+          <p class="mb-2 text-sm text-muted-color">
+            点击坐标：<code class="rounded bg-emphasis px-1 text-color">{{ selectedPoint.x }}, {{ selectedPoint.y }}</code>
           </p>
-          <span class="text-amber-600">未找到包含该点的节点</span>
+          <span class="text-sm text-amber-400">未找到包含该点的节点</span>
         </template>
         <template v-else>
-          <p class="mb-3 text-slate-600">
-            点击坐标：<code class="rounded bg-slate-200 px-1">{{ selectedPoint.x }}, {{ selectedPoint.y }}</code>
+          <p class="mb-3 text-sm text-muted-color">
+            点击坐标：<code class="rounded bg-emphasis px-1 text-color">{{ selectedPoint.x }}, {{ selectedPoint.y }}</code>
             （最内层节点）
           </p>
-          <div class="mb-4 space-y-1.5 text-sm">
-            <template v-for="entry in nodeInfoEntries" :key="entry.key">
-              <div class="flex items-center gap-x-2">
-                <label class="w-28 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">
-                  {{ entry.key }}
-                </label>
-                <span
-                  style="display:inline;  white-space: nowrap;margin-left:20px;"
-                  class="min-w-0 font-normal text-slate-900"
-                  
-                 
-                >
-                  {{ entry.value }}
-                </span>
-                <button
-                  type="button"
-                  class="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-                  title="复制"
-                  @click="copyValueToClipboard(entry.key,entry.value)"
-                >
-                  <i class="pi pi-copy text-sm"></i>
-                </button>
-              </div>
-            </template>
+          <div class="mb-4 flex flex-col gap-1.5 text-sm">
+            <div v-for="entry in nodeInfoEntries" :key="entry.key" class="flex items-center gap-2">
+              <span class="w-28 shrink-0 text-xs font-medium tracking-wide text-muted-color uppercase">
+                {{ entry.key }}
+              </span>
+              <span class="min-w-0 flex-1 truncate" :title="entry.value">{{ entry.value }}</span>
+              <button
+                type="button"
+                class="shrink-0 rounded p-1 text-muted-color hover:bg-emphasis hover:text-color"
+                title="复制"
+                @click="copyValueToClipboard(entry.key, entry.value)"
+              >
+                <i class="pi pi-copy text-sm" />
+              </button>
+            </div>
           </div>
-          <div v-if="xmlTree" class="min-h-0 flex-1 flex flex-col overflow-hidden">
-            <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">XML 层级</p>
-            <div class="min-h-0 flex-1 overflow-y-auto rounded border border-slate-200 bg-white py-1 text-sm">
+          <div v-if="xmlTree" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <p class="mb-2 text-xs font-medium tracking-wide text-muted-color uppercase">XML 层级</p>
+            <div class="min-h-0 flex-1 overflow-y-auto rounded-md border border-surface py-1 text-sm">
               <div
                 v-for="item in flattenedTree"
-                :key="item.node.key"
-                :ref="(el) => { if (item.node.key === selectedBoundsKey && el) selectedNodeRowRef = el }"
-                class="flex cursor-pointer items-center gap-x-1 py-0.5 pr-2 hover:bg-slate-100"
-                :class="item.node.key === selectedBoundsKey ? 'bg-blue-50 ring-inset ring-1 ring-blue-200' : ''"
+                :key="item.node.key + '-' + item.depth"
+                :ref="(el) => trackSelectedRow(item.node.key, el)"
+                class="flex cursor-pointer items-center gap-1 py-0.5 pr-2 hover:bg-emphasis"
+                :class="item.node.key === selectedBoundsKey ? 'bg-highlight' : ''"
                 :style="{ paddingLeft: `${12 + item.depth * 16}px` }"
                 @click="selectTreeNodeBounds(item.node)"
               >
                 <i
                   v-if="item.node.children?.length"
-                  class="pi shrink-0 text-slate-400"
+                  class="pi shrink-0 text-muted-color"
                   :class="expandedKeys.has(item.node.key) ? 'pi-chevron-down' : 'pi-chevron-right'"
                   @click.stop="toggleExpand(item.node.key)"
-                ></i>
-                <span v-else class="w-4 shrink-0"></span>
+                />
+                <span v-else class="w-4 shrink-0" />
                 <span class="min-w-0 truncate" :title="nodeLabel(item.node)">{{ nodeLabel(item.node) }}</span>
               </div>
             </div>

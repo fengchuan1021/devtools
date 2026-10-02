@@ -1,13 +1,13 @@
-<script setup>
+<script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import Dialog from 'primevue/dialog'
-import { useDeviceStore } from '../stores/device'
 import DeviceTerminal from './DeviceTerminal.vue'
+import { useDeviceStore } from '../stores/device'
 
 const deviceStore = useDeviceStore()
 const { terminals } = storeToRefs(deviceStore)
 
-function onHide(id) {
+function onHide(id: string) {
   deviceStore.closeTerminal(id)
 }
 </script>
@@ -27,7 +27,7 @@ function onHide(id) {
   >
     <template #header>
       <div class="flex items-center gap-2">
-        <i class="pi pi-desktop text-slate-500"></i>
+        <i class="pi pi-desktop text-muted-color" />
         <span>终端 {{ term.serial || '未选择设备' }}</span>
       </div>
     </template>

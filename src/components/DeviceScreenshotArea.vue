@@ -1,17 +1,13 @@
-<script setup>
-import { onBeforeUnmount, ref, watch } from 'vue'
+<script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { useDeviceStore } from '../stores/device'
-import { fetchScreenShot } from '../api/device'
 import Card from 'primevue/card'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { fetchScreenShot } from '../api/device'
+import { useDeviceStore } from '../stores/device'
 
-const props = defineProps({
-  /** 选中的设备序列号 */
-  serial: {
-    type: String,
-    default: '',
-  },
-})
+const props = defineProps<{
+  serial?: string
+}>()
 
 const deviceStore = useDeviceStore()
 const { screenshotRefreshKey, containingNodesBounds } = storeToRefs(deviceStore)
@@ -19,9 +15,12 @@ const { screenshotRefreshKey, containingNodesBounds } = storeToRefs(deviceStore)
 const imageUrl = ref('')
 const loading = ref(false)
 const error = ref('')
-const imgRef = ref(null)
-/** 图片原始尺寸（设备像素），用于 SVG viewBox 与矩形坐标 */
+const imgRef = ref<HTMLImageElement | null>(null)
 const imageNaturalSize = ref({ width: 0, height: 0 })
+
+function errorText(reason: unknown, fallback: string) {
+  return reason instanceof Error && reason.message ? reason.message : fallback
+}
 
 async function loadScreenshot() {
   if (!props.serial) {
@@ -37,42 +36,36 @@ async function loadScreenshot() {
     const blob = await fetchScreenShot(props.serial)
     if (imageUrl.value) URL.revokeObjectURL(imageUrl.value)
     imageUrl.value = URL.createObjectURL(blob)
-  } catch (e) {
-    error.value = e.message || '截图获取失败'
+  } catch (reason) {
+    error.value = errorText(reason, '截图获取失败')
     imageUrl.value = ''
   } finally {
     loading.value = false
   }
 }
 
-/** 将点击位置转换为设备像素坐标，并通知 store，用于在 xmllayout 中定位节点 */
-function onImageClick(e) {
+function onImageClick(event: MouseEvent) {
   const img = imgRef.value
   if (!img || !img.naturalWidth) return
   const rect = img.getBoundingClientRect()
-  const displayX = e.clientX - rect.left
-  const displayY = e.clientY - rect.top
   const scaleX = img.naturalWidth / rect.width
   const scaleY = img.naturalHeight / rect.height
-  const x = displayX * scaleX
-  const y = displayY * scaleY
-  deviceStore.setSelectedPoint({ x, y })
+  deviceStore.setSelectedPoint({
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  })
 }
 
 function onImageLoad() {
   const img = imgRef.value
-  if (img && img.naturalWidth && img.naturalHeight) {
+  if (img?.naturalWidth && img.naturalHeight) {
     imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
   } else {
     imageNaturalSize.value = { width: 0, height: 0 }
   }
 }
 
-watch(
-  [() => props.serial, screenshotRefreshKey],
-  () => loadScreenshot(),
-  { immediate: true }
-)
+watch([() => props.serial, screenshotRefreshKey], () => loadScreenshot(), { immediate: true })
 
 onBeforeUnmount(() => {
   if (imageUrl.value) URL.revokeObjectURL(imageUrl.value)
@@ -80,32 +73,29 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Card class="h-full">
- 
+  <Card
+    class="flex h-full min-h-0 flex-col [&_.p-card-body]:flex [&_.p-card-body]:min-h-0 [&_.p-card-body]:flex-1 [&_.p-card-body]:flex-col [&_.p-card-content]:flex [&_.p-card-content]:min-h-0 [&_.p-card-content]:flex-1 [&_.p-card-content]:flex-col"
+  >
     <template #content>
-      <div
-        class="flex h-full min-h-0 min-h-[400px] flex-col items-center justify-center overflow-hidden"
-      >
+      <div class="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden">
         <template v-if="!serial">
-          <span class="text-slate-400">请先选择设备</span>
+          <span class="text-sm text-muted-color">请先选择设备</span>
         </template>
         <template v-else-if="loading">
-          <i class="pi pi-spin pi-spinner mb-2 text-2xl text-slate-400"></i>
-          <span class="text-slate-400">加载中...</span>
+          <i class="pi pi-spin pi-spinner mb-2 text-2xl text-muted-color" />
+          <span class="text-sm text-muted-color">加载中...</span>
         </template>
         <template v-else-if="error">
-          <span class="text-red-500">{{ error }}</span>
+          <span class="text-sm text-red-400">{{ error }}</span>
         </template>
         <template v-else-if="imageUrl">
-          <div
-            class="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
-          >
+          <div class="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
             <div
               class="relative max-h-full max-w-full"
               :style="
                 imageNaturalSize.width && imageNaturalSize.height
                   ? { aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}` }
-                  : {}
+                  : undefined
               "
             >
               <img
@@ -123,14 +113,14 @@ onBeforeUnmount(() => {
                 preserveAspectRatio="none"
               >
                 <rect
-                  v-for="(b, i) in containingNodesBounds"
-                  :key="i"
-                  :x="b.left"
-                  :y="b.top"
-                  :width="b.width"
-                  :height="b.height"
+                  v-for="(bounds, index) in containingNodesBounds"
+                  :key="index"
+                  :x="bounds.left"
+                  :y="bounds.top"
+                  :width="bounds.width"
+                  :height="bounds.height"
                   fill="none"
-                  stroke="rgba(59, 130, 246, 0.85)"
+                  stroke="#007acc"
                   stroke-width="4"
                 />
               </svg>
@@ -141,10 +131,3 @@ onBeforeUnmount(() => {
     </template>
   </Card>
 </template>
-
-<style scoped>
-:deep(.p-card-body),
-:deep(.p-card-content) {
-  height: 100%;
-}
-</style>
