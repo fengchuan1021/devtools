@@ -243,7 +243,15 @@ function copySelectionValueWithoutNewline(event: ClipboardEvent) {
   if (!anchorEl || anchorEl !== focusEl) return
   copyEntryValueWithoutNewline(event, anchorEl.getAttribute('data-copy-value') ?? '')
 }
-
+function getWidthHeight(node) {
+  if (!node.bounds) return ''
+  let reg = /\[(\d+),(\d+)\]\[(\d+),(\d+)\]/
+  let matched = node.bounds.match(reg)
+  if (!matched) return ''
+  let width = parseInt(matched[3]) - parseInt(matched[1])
+  let height = parseInt(matched[4]) - parseInt(matched[2])
+  return `${width}x${height}`
+}
 const nodeInfoEntries = computed(() => {
   const node = selectedNode.value
   if (!node) return []
@@ -254,6 +262,7 @@ const nodeInfoEntries = computed(() => {
     'content-desc',
     'resource-id',
     'bounds',
+    'width_height',
     'checkable',
     'checked',
     'clickable',
@@ -266,7 +275,7 @@ const nodeInfoEntries = computed(() => {
     'visible-to-user',
     'index',
   ]
-  return order.filter((key) => node[key] != null).map((key) => ({ key, value: node[key] ?? '' }))
+  return order.filter((key) => node[key] != null || key=='width_height').map((key) => ({ key, value: key=='width_height' ? getWidthHeight(node) : node[key] ?? '' }))
 })
 
 watch([() => props.serial, screenshotRefreshKey], () => loadXmlLayout(), { immediate: true })

@@ -1,90 +1,214 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { sendScreenLinkCmd } from '../api/device'
+import request from '../utils/request'
 
-const RELAY_KEY = 'screenlink.relay'
-const STUN_KEY = 'screenlink.stun'
-const relayUrl = import.meta.env.VITE_RELAY_URL
-const stunUrl = import.meta.env.VITE_STUN_URL
+interface DeviceGroup {
+  id: number
+  group_name: string
+  devices?: Array<{ serial?: string; profile_serial?: string }>
+}
 
-const relay = ref(localStorage.getItem(RELAY_KEY) || relayUrl)
-const stun = ref(localStorage.getItem(STUN_KEY) || stunUrl)
-const code = ref('')
-const status = ref('输入手机进程打印的连接码')
-const name = ref('')
-const ratio = ref(9 / 16)
-const videoEl = ref<HTMLVideoElement>()
-const connected = ref(false)
+interface Tile {
+  serial: string
+  label: string
+  groupId: number
+  status: string
+  name: string
+  ratio: number
+  connected: boolean
+  hasVideo: boolean
+}
 
-let socket: WebSocket | undefined
-let peer: RTCPeerConnection | undefined
-const pending: RTCIceCandidateInit[] = []
-let remoteSet = false
+interface Session {
+  socket?: WebSocket
+  peer?: RTCPeerConnection
+  pending: RTCIceCandidateInit[]
+  remoteSet: boolean
+  pressing: boolean
+  lastPoint?: { x: number; y: number }
+  moveTimer?: number
+  video?: HTMLVideoElement
+  stream?: MediaStream
+  generation: number
+}
+
+const relay = ref('')
+const stun = ref('')
+const pageStatus = ref('')
+const devicesReady = ref(false)
+const groups = ref<DeviceGroup[]>([])
+const selectedGroup = ref<number | 'all'>('all')
+const tiles = ref<Tile[]>([])
+const tileWidth = ref(240)
+const tileHeight = ref(288)
+const sessions = new Map<string, Session>()
+let resizing = false
+let resizeOrigin = { x: 0, y: 0, width: 0, height: 0 }
+
+const visibleTiles = computed(() => {
+  if (selectedGroup.value === 'all') return tiles.value
+  return tiles.value.filter((tile) => tile.groupId === selectedGroup.value)
+})
 
 onMounted(() => {
-  videoEl.value?.addEventListener('loadedmetadata', syncRatio)
+  void Promise.all([loadWebRTCConfig(), loadDevices()])
 })
 
 onUnmounted(() => {
-  videoEl.value?.removeEventListener('loadedmetadata', syncRatio)
-  disconnect()
+  for (const tile of tiles.value) disconnectTile(tile)
 })
 
-function syncRatio() {
-  const video = videoEl.value
-  if (video && video.videoWidth > 0 && video.videoHeight > 0) {
-    ratio.value = video.videoWidth / video.videoHeight
+function sessionOf(serial: string) {
+  let session = sessions.get(serial)
+  if (!session) {
+    session = { pending: [], remoteSet: false, pressing: false, generation: 0 }
+    sessions.set(serial, session)
+  }
+  return session
+}
+
+async function loadWebRTCConfig() {
+  try {
+    const data = await request.get<{ relay?: string; stun?: string }>('/api/getwebrtcconfig')
+    relay.value = (data.relay || '').trim()
+    stun.value = (data.stun || '').trim()
+    if (!relay.value || !stun.value) {
+      pageStatus.value = '画面配置不完整'
+    }
+  } catch {
+    pageStatus.value = '获取画面配置失败'
   }
 }
 
-function remember() {
-  localStorage.setItem(RELAY_KEY, relay.value.trim())
-  localStorage.setItem(STUN_KEY, stun.value.trim())
+async function loadDevices() {
+  try {
+    const body = await request.post<{ code?: number; msg?: string; data?: DeviceGroup[] }>(
+      '/api/devices/getDevicesTree',
+      { allusers: false },
+    )
+    if (body.code !== 200 || !Array.isArray(body.data)) {
+      pageStatus.value = body.msg || '获取设备分组失败'
+      return
+    }
+    groups.value = body.data
+    rebuildTiles(body.data)
+  } catch {
+    pageStatus.value = '获取设备分组失败'
+  } finally {
+    devicesReady.value = true
+  }
 }
 
-function connect() {
-  if (connected.value) {
-    disconnect()
-    status.value = '已断开'
+function rebuildTiles(list: DeviceGroup[]) {
+  const next: Tile[] = []
+  const seen = new Set<string>()
+  for (const group of list) {
+    for (const device of group.devices ?? []) {
+      const serial = (device.serial || '').trim()
+      if (!serial || seen.has(serial)) continue
+      seen.add(serial)
+      const profile = (device.profile_serial || '').trim()
+      const previous = tiles.value.find((item) => item.serial === serial)
+      if (previous) {
+        previous.label = `${profile}-${serial}`
+        previous.groupId = group.id
+        next.push(previous)
+        continue
+      }
+      next.push({
+        serial,
+        label: `${profile}-${serial}`,
+        groupId: group.id,
+        status: '',
+        name: '',
+        ratio: 9 / 16,
+        connected: false,
+        hasVideo: false,
+      })
+    }
+  }
+  for (const tile of tiles.value) {
+    if (!seen.has(tile.serial)) disconnectTile(tile)
+  }
+  tiles.value = next
+}
+
+function selectGroup(id: number | 'all') {
+  selectedGroup.value = id
+}
+
+function setVideo(serial: string, element: unknown) {
+  const session = sessionOf(serial)
+  session.video = element instanceof HTMLVideoElement ? element : undefined
+  if (session.video && session.stream) {
+    session.video.srcObject = session.stream
+    void session.video.play().catch(() => {})
+  }
+}
+
+function syncRatio(tile: Tile, event: Event) {
+  const video = event.target
+  if (!(video instanceof HTMLVideoElement) || video.videoWidth <= 0 || video.videoHeight <= 0) return
+  tile.ratio = video.videoWidth / video.videoHeight
+}
+
+async function connectTile(tile: Tile) {
+  if (tile.connected) return
+  if (!relay.value || !stun.value) {
+    tile.status = '画面配置未就绪'
     return
   }
-  const normalized = code.value.trim().toUpperCase()
-  if (!/^[A-Z0-9]{6}$/.test(normalized)) {
-    status.value = '连接码必须是 6 位字母或数字'
+  const session = sessionOf(tile.serial)
+  const generation = ++session.generation
+  session.remoteSet = false
+  session.pending = []
+  tile.name = ''
+  tile.hasVideo = false
+  tile.status = '正在通知手机'
+  tile.connected = true
+  try {
+    await sendScreenLinkCmd(tile.serial, 'begin')
+  } catch {
+    if (session.generation === generation) {
+      tile.connected = false
+      tile.status = '通知手机失败'
+    }
     return
   }
-  remember()
-  remoteSet = false
-  pending.length = 0
-  name.value = ''
-  status.value = '正在连接中继'
-  connected.value = true
-  const current = new WebSocket(relay.value.trim())
-  socket = current
+  if (session.generation !== generation) {
+    void sendScreenLinkCmd(tile.serial, 'end').catch(() => {})
+    return
+  }
+  tile.status = '正在连接中继'
+  const current = new WebSocket(relay.value)
+  session.socket = current
   current.onopen = () => {
-    status.value = '正在等待手机'
-    current.send(JSON.stringify({ type: 'join', code: normalized }))
+    if (session.socket !== current) return
+    tile.status = '正在等待手机'
+    current.send(JSON.stringify({ type: 'join', code: tile.serial }))
   }
   current.onmessage = (event) => {
-    if (typeof event.data === 'string') {
-      void onSignal(event.data)
-    }
+    if (typeof event.data === 'string') void onSignal(tile, event.data)
   }
   current.onerror = () => {
-    status.value = '中继连接失败'
+    if (session.socket === current) tile.status = '中继连接失败'
   }
   current.onclose = () => {
-    if (socket === current) {
-      socket = undefined
-      connected.value = false
-      status.value = '信令已断开'
-    }
+    if (session.socket !== current) return
+    session.socket = undefined
+    closePeer(tile)
+    tile.connected = false
+    tile.hasVideo = false
+    tile.name = ''
+    tile.status = '信令已断开'
+    void sendScreenLinkCmd(tile.serial, 'end').catch(() => {})
   }
 }
 
-async function onSignal(text: string) {
-  const message = JSON.parse(text) as {
+async function onSignal(tile: Tile, text: string) {
+  let message: {
     type?: string
     name?: string
     sdp?: string
@@ -94,41 +218,48 @@ async function onSignal(text: string) {
     message?: string
     ok?: boolean
   }
+  try {
+    message = JSON.parse(text)
+  } catch {
+    return
+  }
+  const session = sessionOf(tile.serial)
   if (message.type === 'waiting') {
-    status.value = '等待手机登记'
+    tile.status = '等待手机登记'
     return
   }
   if (message.type === 'joined') {
-    name.value = message.name || '手机'
-    status.value = '正在建立画面'
-    openPeer()
+    tile.name = message.name || '手机'
+    tile.status = '正在建立画面'
+    openPeer(tile)
     return
   }
   if (message.type === 'error') {
-    status.value = message.message || '信令错误'
+    tile.status = message.message || '信令错误'
     return
   }
   if (message.type === 'peer-left') {
-    status.value = '手机已断开'
+    tile.status = '手机已断开'
+    tile.name = ''
+    tile.hasVideo = false
+    closePeer(tile)
     return
   }
   if (message.type === 'shot') {
-    status.value = message.ok ? '截图已保存到手机 Download' : '截图失败'
+    tile.status = message.ok ? '截图已保存到手机 Download' : '截图失败'
     return
   }
-  if (!peer) {
-    return
-  }
+  if (!session.peer) return
   if (message.type === 'offer' && message.sdp) {
-    await peer.setRemoteDescription({ type: 'offer', sdp: message.sdp })
-    remoteSet = true
-    for (const candidate of pending) {
-      await peer.addIceCandidate(candidate)
+    await session.peer.setRemoteDescription({ type: 'offer', sdp: message.sdp })
+    session.remoteSet = true
+    for (const candidate of session.pending) {
+      await session.peer.addIceCandidate(candidate)
     }
-    pending.length = 0
-    const answer = await peer.createAnswer()
-    await peer.setLocalDescription(answer)
-    socket?.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }))
+    session.pending = []
+    const answer = await session.peer.createAnswer()
+    await session.peer.setLocalDescription(answer)
+    session.socket?.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }))
     return
   }
   if (message.type === 'candidate' && message.candidate) {
@@ -137,35 +268,34 @@ async function onSignal(text: string) {
       sdpMid: message.sdpMid,
       sdpMLineIndex: message.sdpMLineIndex,
     }
-    if (!remoteSet) {
-      pending.push(candidate)
+    if (!session.remoteSet) {
+      session.pending.push(candidate)
     } else {
-      await peer.addIceCandidate(candidate)
+      await session.peer.addIceCandidate(candidate)
     }
   }
 }
 
-function openPeer() {
-  peer?.close()
+function openPeer(tile: Tile) {
+  const session = sessionOf(tile.serial)
+  session.peer?.close()
   const connection = new RTCPeerConnection({
-    iceServers: [{ urls: stun.value.trim() }],
+    iceServers: [{ urls: stun.value }],
   })
-  peer = connection
+  session.peer = connection
   connection.ontrack = (event) => {
-    const video = videoEl.value
-    if (!video) {
-      return
-    }
     const stream = event.streams[0] ?? new MediaStream([event.track])
-    video.srcObject = stream
-    void video.play().catch(() => {})
-    status.value = '正在接收画面'
+    session.stream = stream
+    tile.hasVideo = true
+    if (session.video) {
+      session.video.srcObject = stream
+      void session.video.play().catch(() => {})
+    }
+    tile.status = '正在接收画面'
   }
   connection.onicecandidate = (event) => {
-    if (!event.candidate) {
-      return
-    }
-    socket?.send(
+    if (!event.candidate || session.socket?.readyState !== WebSocket.OPEN) return
+    session.socket.send(
       JSON.stringify({
         type: 'candidate',
         candidate: event.candidate.candidate,
@@ -176,68 +306,64 @@ function openPeer() {
   }
   connection.oniceconnectionstatechange = () => {
     if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
-      status.value = '画面通道已建立'
+      tile.status = '画面通道已建立'
     } else if (connection.iceConnectionState === 'failed') {
-      status.value = 'UDP 打洞失败'
+      tile.status = 'UDP 打洞失败'
     }
   }
 }
 
-function sendControl(action: string) {
-  if (!name.value || socket?.readyState !== WebSocket.OPEN) {
-    return
-  }
-  socket.send(JSON.stringify({ type: 'control', action }))
+function closePeer(tile: Tile) {
+  const session = sessions.get(tile.serial)
+  if (!session) return
+  session.peer?.close()
+  session.peer = undefined
+  session.stream = undefined
+  session.remoteSet = false
+  session.pending = []
+  if (session.video) session.video.srcObject = null
 }
 
-let pressing = false
-let lastPoint: { x: number; y: number } | undefined
-let moveTimer: number | undefined
+function sendControl(tile: Tile, action: string) {
+  const session = sessions.get(tile.serial)
+  if (!tile.name || session?.socket?.readyState !== WebSocket.OPEN) return
+  session.socket.send(JSON.stringify({ type: 'control', action }))
+}
 
 function videoPoint(event: MouseEvent) {
-  const video = videoEl.value
-  if (!video) {
-    return
-  }
+  const video = event.currentTarget
+  if (!(video instanceof HTMLVideoElement)) return
   const rect = video.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) {
-    return
-  }
+  if (rect.width <= 0 || rect.height <= 0) return
   return {
     x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
     y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
   }
 }
 
-function sendTouch(phase: string, x: number, y: number) {
-  if (!name.value || socket?.readyState !== WebSocket.OPEN) {
-    return
-  }
-  socket.send(JSON.stringify({ type: 'control', action: 'touch', phase, x, y }))
+function sendTouch(tile: Tile, phase: string, x: number, y: number) {
+  const session = sessions.get(tile.serial)
+  if (!tile.name || session?.socket?.readyState !== WebSocket.OPEN) return
+  session.socket.send(JSON.stringify({ type: 'control', action: 'touch', phase, x, y }))
 }
 
-function onPointerDown(event: PointerEvent) {
-  if (!name.value) {
-    return
-  }
+function onPointerDown(tile: Tile, event: PointerEvent) {
+  if (!tile.name) return
   if (event.button === 2) {
-    sendControl('back')
+    sendControl(tile, 'back')
     return
   }
   if (event.button === 1) {
-    sendControl('home')
+    sendControl(tile, 'home')
     return
   }
-  if (event.button !== 0) {
-    return
-  }
+  if (event.button !== 0) return
   const point = videoPoint(event)
-  if (!point) {
-    return
-  }
-  pressing = true
-  lastPoint = point
-  sendTouch('down', point.x, point.y)
+  if (!point) return
+  const session = sessionOf(tile.serial)
+  session.pressing = true
+  session.lastPoint = point
+  sendTouch(tile, 'down', point.x, point.y)
   try {
     ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
   } catch {
@@ -245,62 +371,85 @@ function onPointerDown(event: PointerEvent) {
   }
 }
 
-function onPointerMove(event: PointerEvent) {
-  if (!pressing) {
-    return
-  }
+function onPointerMove(tile: Tile, event: PointerEvent) {
+  const session = sessions.get(tile.serial)
+  if (!session?.pressing) return
   const point = videoPoint(event)
-  if (!point) {
-    return
-  }
-  lastPoint = point
-  if (moveTimer != null) {
-    return
-  }
-  moveTimer = window.setTimeout(() => {
-    moveTimer = undefined
-    if (pressing && lastPoint) {
-      sendTouch('move', lastPoint.x, lastPoint.y)
+  if (!point) return
+  session.lastPoint = point
+  if (session.moveTimer != null) return
+  session.moveTimer = window.setTimeout(() => {
+    session.moveTimer = undefined
+    if (session.pressing && session.lastPoint) {
+      sendTouch(tile, 'move', session.lastPoint.x, session.lastPoint.y)
     }
   }, 16)
 }
 
-function onPointerUp(event: PointerEvent) {
-  if (!pressing || (event.type !== 'pointercancel' && event.button !== 0)) {
-    return
+function onPointerUp(tile: Tile, event: PointerEvent) {
+  const session = sessions.get(tile.serial)
+  if (!session?.pressing || (event.type !== 'pointercancel' && event.button !== 0)) return
+  session.pressing = false
+  if (session.moveTimer != null) {
+    window.clearTimeout(session.moveTimer)
+    session.moveTimer = undefined
   }
-  pressing = false
-  if (moveTimer != null) {
-    window.clearTimeout(moveTimer)
-    moveTimer = undefined
-  }
-  const point = videoPoint(event) ?? lastPoint
-  if (point) {
-    sendTouch('up', point.x, point.y)
-  }
+  const point = videoPoint(event) ?? session.lastPoint
+  if (point) sendTouch(tile, 'up', point.x, point.y)
 }
 
-function onWheel(event: WheelEvent) {
+function onWheel(tile: Tile, event: WheelEvent) {
+  const session = sessions.get(tile.serial)
   const point = videoPoint(event)
-  if (!point || !name.value || socket?.readyState !== WebSocket.OPEN) {
-    return
-  }
+  if (!point || !tile.name || session?.socket?.readyState !== WebSocket.OPEN) return
   const dx = Math.max(-1, Math.min(1, event.deltaX / 120))
   const dy = Math.max(-1, Math.min(1, -event.deltaY / 120))
-  if (dx === 0 && dy === 0) {
-    return
-  }
-  socket.send(JSON.stringify({ type: 'control', action: 'scroll', x: point.x, y: point.y, dx, dy }))
+  if (dx === 0 && dy === 0) return
+  session.socket.send(JSON.stringify({ type: 'control', action: 'scroll', x: point.x, y: point.y, dx, dy }))
 }
 
-function disconnect() {
-  connected.value = false
-  socket?.close()
-  socket = undefined
-  peer?.close()
-  peer = undefined
-  if (videoEl.value) {
-    videoEl.value.srcObject = null
+function onResizeDown(event: PointerEvent) {
+  resizing = true
+  resizeOrigin = {
+    x: event.clientX,
+    y: event.clientY,
+    width: tileWidth.value,
+    height: tileHeight.value,
+  }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+function onResizeMove(event: PointerEvent) {
+  if (!resizing) return
+  tileWidth.value = Math.min(960, Math.max(180, resizeOrigin.width + event.clientX - resizeOrigin.x))
+  tileHeight.value = Math.min(1400, Math.max(120, resizeOrigin.height + event.clientY - resizeOrigin.y))
+}
+
+function onResizeUp() {
+  resizing = false
+}
+
+function disconnectTile(tile: Tile) {
+  const wasConnected = tile.connected
+  const session = sessions.get(tile.serial)
+  if (session) {
+    session.generation++
+    const current = session.socket
+    session.socket = undefined
+    current?.close()
+    if (session.moveTimer != null) {
+      window.clearTimeout(session.moveTimer)
+      session.moveTimer = undefined
+    }
+    session.pressing = false
+    closePeer(tile)
+  }
+  tile.connected = false
+  tile.hasVideo = false
+  tile.name = ''
+  tile.status = '已断开'
+  if (wasConnected) {
+    void sendScreenLinkCmd(tile.serial, 'end').catch(() => {})
   }
 }
 </script>
@@ -308,44 +457,73 @@ function disconnect() {
 <template>
   <section class="flex h-full min-h-0 flex-col gap-4 p-6">
     <div class="flex items-end justify-between gap-4">
-      <h1 class="text-3xl font-medium">画面</h1>
-      <p class="text-sm text-muted-color">{{ status }}</p>
+   
+      <p class="text-sm text-muted-color">{{ pageStatus }}</p>
     </div>
-    <form class="flex flex-wrap gap-2" @submit.prevent="connect">
-      <InputText v-model="relay" class="min-w-64 flex-1" :placeholder="relayUrl" />
-      <InputText v-model="stun" class="min-w-48 flex-1" :placeholder="stunUrl" />
-      <InputText v-model="code" class="w-32 uppercase" placeholder="连接码" maxlength="6" />
-      <Button type="submit" :label="connected ? '断开' : '连接'" />
-    </form>
-    <div class="flex min-h-0 flex-1 flex-col gap-2">
-      <p v-if="name" class="text-sm">{{ name }}</p>
-      <div class="flex min-h-0 flex-1 items-center justify-center rounded-md [container-type:size]">
-        <video
-          ref="videoEl"
-          autoplay
-          playsinline
-          muted
-          class="bg-black touch-none select-none"
-          aria-label="手机画面"
-          :style="{
-            aspectRatio: `${ratio}`,
-            width: `min(100cqw, calc(100cqh * ${ratio}))`,
-            height: 'auto',
-          }"
-          @pointerdown.prevent="onPointerDown"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-          @pointercancel="onPointerUp"
-          @contextmenu.prevent
-          @wheel.prevent="onWheel"
-        />
-      </div>
-      <div class="flex justify-center gap-2">
-        <Button icon="pi pi-arrow-left" rounded outlined aria-label="返回" :disabled="!name" @click="sendControl('back')" />
-        <Button icon="pi pi-home" rounded outlined aria-label="主页" :disabled="!name" @click="sendControl('home')" />
-        <Button icon="pi pi-clone" rounded outlined aria-label="最近任务" :disabled="!name" @click="sendControl('recents')" />
-        <Button icon="pi pi-camera" rounded outlined aria-label="截图" :disabled="!name" @click="sendControl('shot')" />
-      </div>
+    <div class="flex flex-wrap gap-2">
+      <Button label="全部" size="small" :outlined="selectedGroup !== 'all'" @click="selectGroup('all')" />
+      <Button
+        v-for="group in groups"
+        :key="group.id"
+        size="small"
+        :label="group.group_name || `分组 ${group.id}`"
+        :outlined="selectedGroup !== group.id"
+        @click="selectGroup(group.id)"
+      />
+    </div>
+    <p v-if="devicesReady && visibleTiles.length === 0" class="text-sm text-muted-color">没有设备</p>
+    <div class="flex min-h-0 flex-1 flex-wrap content-start gap-3 overflow-auto">
+      <article
+        v-for="tile in visibleTiles"
+        :key="tile.serial"
+        class="relative flex flex-col gap-2 rounded-md border border-surface p-2"
+        :style="{ width: `${tileWidth}px` }"
+      >
+        <div class="flex items-center gap-2">
+          <p class="min-w-0 flex-1 truncate text-sm" :title="tile.label">{{ tile.label }}</p>
+          <Button label="连接" size="small" :disabled="tile.connected" @click="connectTile(tile)" />
+          <Button label="断开" size="small" severity="secondary" :disabled="!tile.connected" @click="disconnectTile(tile)" />
+        </div>
+        <div
+          class="flex items-center justify-center overflow-hidden rounded-md bg-black"
+          :style="{ height: `${tileHeight}px` }"
+        >
+          <i v-show="!tile.hasVideo" class="pi pi-image text-4xl text-muted-color" aria-label="加载失败" />
+          <video
+            v-show="tile.hasVideo"
+            :ref="(element) => setVideo(tile.serial, element)"
+            autoplay
+            playsinline
+            muted
+            class="max-h-full bg-black touch-none select-none"
+            :aria-label="tile.label"
+            :style="{ aspectRatio: `${tile.ratio}`, height: '100%' }"
+            @loadedmetadata="syncRatio(tile, $event)"
+            @pointerdown.prevent="onPointerDown(tile, $event)"
+            @pointermove="onPointerMove(tile, $event)"
+            @pointerup="onPointerUp(tile, $event)"
+            @pointercancel="onPointerUp(tile, $event)"
+            @contextmenu.prevent
+            @wheel.prevent="onWheel(tile, $event)"
+          />
+        </div>
+        <div class="flex justify-center gap-1">
+          <Button icon="pi pi-arrow-left" rounded outlined aria-label="返回" size="small" :disabled="!tile.name" @click="sendControl(tile, 'back')" />
+          <Button icon="pi pi-home" rounded outlined aria-label="主页" size="small" :disabled="!tile.name" @click="sendControl(tile, 'home')" />
+          <Button icon="pi pi-clone" rounded outlined aria-label="最近任务" size="small" :disabled="!tile.name" @click="sendControl(tile, 'recents')" />
+          <Button icon="pi pi-camera" rounded outlined aria-label="截图" size="small" :disabled="!tile.name" @click="sendControl(tile, 'shot')" />
+        </div>
+        <p class="truncate text-xs text-muted-color">{{ tile.status }}</p>
+        <div
+          class="absolute bottom-0 right-0 z-10 h-4 w-4 cursor-nwse-resize"
+          @pointerdown.stop.prevent="onResizeDown"
+          @pointermove="onResizeMove"
+          @pointerup="onResizeUp"
+          @pointercancel="onResizeUp"
+        >
+          <span class="pointer-events-none absolute bottom-1 right-1 h-2.5 w-2.5 border-b-2 border-r-2 border-muted-color" />
+        </div>
+      </article>
     </div>
   </section>
 </template>

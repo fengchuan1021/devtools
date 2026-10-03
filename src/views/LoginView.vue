@@ -1,23 +1,13 @@
 <script setup lang="ts">
-import axios from 'axios'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Password from 'primevue/password'
 import { ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { http } from '../api/http'
+import { login, readErrorMessage } from '../api/auth'
 import { pathAfterLogin } from '../router/redirect'
-import { useUserStore, type UserInfo } from '../stores/user'
-
-interface LoginBody {
-  msg?: string
-  error?: string
-  data?: {
-    token?: string
-    user?: UserInfo
-  }
-}
+import { useUserStore } from '../stores/user'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,17 +17,6 @@ const username = ref('')
 const password = ref('')
 const errorMessage = ref('')
 const submitting = ref(false)
-
-function loginError(error: unknown) {
-  if (axios.isAxiosError(error)) {
-    const data = error.response?.data as { error?: string; message?: string; msg?: string } | undefined
-    if (data?.error) return data.error
-    if (data?.message) return data.message
-    if (data?.msg) return data.msg
-    if (!error.response) return '无法连接服务器'
-  }
-  return '登录失败'
-}
 
 function notifyHost(token: string) {
   const bridge = (window as Window & { AndroidBridge?: { setToken?: (value: string) => string } })
@@ -60,15 +39,11 @@ async function submit() {
 
   submitting.value = true
   try {
-    const { data } = await http.post<LoginBody>(
-      '/api/user/login',
-      { username: name, password: password.value },
-      { skipAuth: true },
-    )
-    const token = data.data?.token
-    const profile = data.data?.user
+    const body = await login(name, password.value)
+    const token = body.data?.token
+    const profile = body.data?.user
     if (!token || !profile) {
-      errorMessage.value = data.msg || data.error || '登录失败'
+      errorMessage.value = body.msg || body.error || '登录失败'
       return
     }
     user.setToken(token)
@@ -77,7 +52,7 @@ async function submit() {
     const next = pathAfterLogin(route.query.redirect)
     await router.replace(typeof next === 'string' ? next : '/')
   } catch (error) {
-    errorMessage.value = loginError(error)
+    errorMessage.value = readErrorMessage(error)
   } finally {
     submitting.value = false
   }

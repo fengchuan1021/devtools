@@ -6,12 +6,9 @@ import Password from 'primevue/password'
 import { ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { readErrorMessage, register } from '../api/auth'
-import { pathAfterLogin } from '../router/redirect'
-import { useUserStore } from '../stores/user'
 
 const route = useRoute()
 const router = useRouter()
-const user = useUserStore()
 
 const username = ref('')
 const password = ref('')
@@ -33,10 +30,8 @@ async function submit() {
 
   submitting.value = true
   try {
-    const { data } = await register(name, password.value)
-    user.setToken(data.token)
-    user.setProfile(data.user)
-    await router.replace(pathAfterLogin(route.query.redirect))
+    await register(name, password.value)
+    await router.replace({ name: 'login', query: route.query })
   } catch (error) {
     errorMessage.value = readErrorMessage(error)
   } finally {

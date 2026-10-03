@@ -11,10 +11,9 @@ alwaysApply: false
 - PrimeVue 按组件导入，例如 `import Button from 'primevue/button'`
 - Pinia 使用 setup store（`defineStore(id, () => { ... })`）
 - 布局和间距用 Tailwind。组件外观交给 PrimeVue，需要覆盖时用工具类
-- 使用 Aura 深色，接近 VS Code。`html` 保持 `app-dark`，主色用 `#007acc`
 - 路由写在 `src/router`，页面放在 `src/views`。左侧菜单与路由同名，用 `RouterLink` 跳转。业务页不要绕过登录守卫
-- 接口请求使用 `src/api/http.ts`。token 由请求拦截器从 `useUserStore` 注入，不要另写 `fetch` 或新建客户端
+- 接口请求使用 `src/utils/request.ts`。token 从 `useUserStore` 读取，写入请求头 `token`。不要另写 `fetch`，不要使用 axios
 - 标题栏下面是左右布局：左侧菜单，右侧内容区。菜单来自路由，内容区使用 `RouterView`
-- 用户 token 与资料放在 `useUserStore`。HTTP 只走 `src/api/http.ts`，由请求拦截器写入 `Authorization`
+- 用户 token 与资料放在 `useUserStore`。响应 401 时清除登录态并进入登录页
 - 没有 token 时进入登录页。`login` 和 `register` 是公开路由，其余路由都要登录
 - 主题使用 Aura 深色，接近 VS Code 的冷灰。深色由 `html` 的 `app-dark` 打开，主色用 `#007acc`。
