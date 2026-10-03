@@ -140,11 +140,13 @@ function selectGroup(id: number | 'all') {
 }
 
 function setVideo(serial: string, element: unknown) {
+  // 列表重绘时 Vue 会先用 null 调用旧 ref。忽略这次清空，避免正在播放的画面被拆掉。
+  if (!(element instanceof HTMLVideoElement)) return
   const session = sessionOf(serial)
-  session.video = element instanceof HTMLVideoElement ? element : undefined
-  if (session.video && session.stream) {
-    session.video.srcObject = session.stream
-    void session.video.play().catch(() => {})
+  session.video = element
+  if (session.stream && element.srcObject !== session.stream) {
+    element.srcObject = session.stream
+    void element.play().catch(() => {})
   }
 }
 
@@ -316,12 +318,14 @@ function openPeer(tile: Tile) {
 function closePeer(tile: Tile) {
   const session = sessions.get(tile.serial)
   if (!session) return
+  const video = session.video
+  const stream = session.stream
   session.peer?.close()
   session.peer = undefined
   session.stream = undefined
   session.remoteSet = false
   session.pending = []
-  if (session.video) session.video.srcObject = null
+  if (video && video.srcObject === stream) video.srcObject = null
 }
 
 function sendControl(tile: Tile, action: string) {
