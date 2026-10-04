@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { sendScreenLinkCmd } from '../api/device'
 import request from '../utils/request'
@@ -12,6 +13,7 @@ interface DeviceGroup {
 
 interface Tile {
   serial: string
+  profileSerial: string
   label: string
   groupId: number
   status: string
@@ -40,6 +42,7 @@ const pageStatus = ref('')
 const devicesReady = ref(false)
 const groups = ref<DeviceGroup[]>([])
 const selectedGroup = ref<number | 'all'>('all')
+const deviceQuery = ref('')
 const tiles = ref<Tile[]>([])
 const tileWidth = ref(240)
 const tileHeight = ref(288)
@@ -49,8 +52,12 @@ let resizing = false
 let resizeOrigin = { x: 0, y: 0, width: 0, height: 0 }
 
 const visibleTiles = computed(() => {
-  if (selectedGroup.value === 'all') return tiles.value
-  return tiles.value.filter((tile) => tile.groupId === selectedGroup.value)
+  const query = deviceQuery.value.trim().toLowerCase()
+  return tiles.value.filter((tile) => {
+    if (selectedGroup.value !== 'all' && tile.groupId !== selectedGroup.value) return false
+    if (!query) return true
+    return tile.serial.toLowerCase().includes(query) || tile.profileSerial.toLowerCase().includes(query)
+  })
 })
 
 onMounted(() => {
@@ -115,6 +122,7 @@ function rebuildTiles(list: DeviceGroup[]) {
       const profile = (device.profile_serial || '').trim()
       const previous = tiles.value.find((item) => item.serial === serial)
       if (previous) {
+        previous.profileSerial = profile
         previous.label = `${profile}-${serial}`
         previous.groupId = group.id
         next.push(previous)
@@ -122,6 +130,7 @@ function rebuildTiles(list: DeviceGroup[]) {
       }
       next.push({
         serial,
+        profileSerial: profile,
         label: `${profile}-${serial}`,
         groupId: group.id,
         status: '',
@@ -140,6 +149,14 @@ function rebuildTiles(list: DeviceGroup[]) {
 
 function selectGroup(id: number | 'all') {
   selectedGroup.value = id
+}
+
+function tileFocused(tile: Tile) {
+  return deviceQuery.value.trim().toLowerCase() === tile.serial.toLowerCase()
+}
+
+function toggleFocus(tile: Tile) {
+  deviceQuery.value = tileFocused(tile) ? '' : tile.serial
 }
 
 function setVideo(serial: string, element: unknown) {
@@ -507,8 +524,17 @@ function disconnectTile(tile: Tile) {
         :outlined="selectedGroup !== group.id"
         @click="selectGroup(group.id)"
       />
+      <InputText
+        v-model="deviceQuery"
+        size="small"
+        placeholder="搜索序列号"
+        class="w-52"
+        aria-label="搜索序列号"
+      />
     </div>
-    <p v-if="devicesReady && visibleTiles.length === 0" class="text-sm text-muted-color">没有设备</p>
+    <p v-if="devicesReady && visibleTiles.length === 0" class="text-sm text-muted-color">
+      {{ deviceQuery.trim() ? '没有匹配的设备' : '没有设备' }}
+    </p>
     <div class="flex min-h-0 flex-1 flex-wrap content-start gap-3 overflow-auto">
       <article
         v-for="tile in visibleTiles"
@@ -518,8 +544,12 @@ function disconnectTile(tile: Tile) {
       >
         <div class="flex items-center gap-2">
           <p class="min-w-0 flex-1 truncate text-sm" :title="tile.label">{{ tile.label }}</p>
-          <Button label="连接" size="small" :disabled="tile.connected" @click="connectTile(tile)" />
-          <Button label="断开" size="small" severity="secondary" :disabled="!tile.connected" @click="disconnectTile(tile)" />
+          <span v-tooltip.top="'连接'" class="inline-flex">
+            <Button icon="pi pi-link" rounded outlined size="small" aria-label="连接" :disabled="tile.connected" :class="tile.connected ? 'pointer-events-none' : ''" @click="connectTile(tile)" />
+          </span>
+          <span v-tooltip.top="'断开'" class="inline-flex">
+            <Button icon="pi pi-power-off" rounded outlined size="small" severity="secondary" aria-label="断开" :disabled="!tile.connected" :class="tile.connected ? '' : 'pointer-events-none'" @click="disconnectTile(tile)" />
+          </span>
         </div>
         <div
           class="flex items-center justify-center overflow-hidden rounded-md bg-black"
@@ -549,6 +579,16 @@ function disconnectTile(tile: Tile) {
           <Button icon="pi pi-home" rounded outlined aria-label="主页" size="small" :disabled="!tile.name" @click="sendControl(tile, 'home')" />
           <Button icon="pi pi-clone" rounded outlined aria-label="最近任务" size="small" :disabled="!tile.name" @click="sendControl(tile, 'recents')" />
           <Button icon="pi pi-camera" rounded outlined aria-label="截图" size="small" :disabled="!tile.name" @click="sendControl(tile, 'shot')" />
+          <span v-tooltip.top="tileFocused(tile) ? '失焦' : '聚焦'" class="inline-flex">
+            <Button
+              :icon="tileFocused(tile) ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              rounded
+              size="small"
+              :outlined="!tileFocused(tile)"
+              :aria-label="tileFocused(tile) ? '失焦' : '聚焦'"
+              @click="toggleFocus(tile)"
+            />
+          </span>
         </div>
         <p class="truncate text-xs text-muted-color">{{ tile.status }}</p>
         <div
