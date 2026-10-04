@@ -19,6 +19,10 @@ export default defineConfig({
         target: 'http://192.168.1.234:8080',
         ws: true,
       },
+      '/screenlink': {
+        target: 'http://192.168.1.234:8080',
+        ws: true,
+      },
     },
   },
 })

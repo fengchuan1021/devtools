@@ -44,6 +44,7 @@ const tiles = ref<Tile[]>([])
 const tileWidth = ref(240)
 const tileHeight = ref(288)
 const sessions = new Map<string, Session>()
+let activeSerial = ''
 let resizing = false
 let resizeOrigin = { x: 0, y: 0, width: 0, height: 0 }
 
@@ -53,10 +54,12 @@ const visibleTiles = computed(() => {
 })
 
 onMounted(() => {
+  window.addEventListener('keydown', onShortcutKey, true)
   void Promise.all([loadWebRTCConfig(), loadDevices()])
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onShortcutKey, true)
   for (const tile of tiles.value) disconnectTile(tile)
 })
 
@@ -158,6 +161,7 @@ function syncRatio(tile: Tile, event: Event) {
 
 async function connectTile(tile: Tile) {
   if (tile.connected) return
+  activeSerial = tile.serial
   if (!relay.value || !stun.value) {
     tile.status = '画面配置未就绪'
     return
@@ -184,7 +188,8 @@ async function connectTile(tile: Tile) {
     return
   }
   tile.status = '正在连接中继'
-  const current = new WebSocket(relay.value)
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const current = new WebSocket(`${protocol}//${location.host}/screenlink`)
   session.socket = current
   current.onopen = () => {
     if (session.socket !== current) return
@@ -331,7 +336,33 @@ function closePeer(tile: Tile) {
 function sendControl(tile: Tile, action: string) {
   const session = sessions.get(tile.serial)
   if (!tile.name || session?.socket?.readyState !== WebSocket.OPEN) return
+  activeSerial = tile.serial
   session.socket.send(JSON.stringify({ type: 'control', action }))
+}
+
+function shortcutTile() {
+  const selected = tiles.value.find((tile) => tile.serial === activeSerial && tile.name)
+  if (selected) return selected
+  const joined = tiles.value.filter((tile) => tile.name)
+  return joined.length === 1 ? joined[0] : undefined
+}
+
+function onShortcutKey(event: KeyboardEvent) {
+  if (!event.altKey || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey) return
+  const target = event.target
+  if (
+    target instanceof HTMLElement &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+  ) {
+    return
+  }
+  const action =
+    event.code === 'KeyH' ? 'home' : event.code === 'KeyS' ? 'recents' : event.code === 'KeyB' ? 'back' : ''
+  if (!action) return
+  const tile = shortcutTile()
+  if (!tile) return
+  event.preventDefault()
+  sendControl(tile, action)
 }
 
 function videoPoint(event: MouseEvent) {
@@ -353,6 +384,7 @@ function sendTouch(tile: Tile, phase: string, x: number, y: number) {
 
 function onPointerDown(tile: Tile, event: PointerEvent) {
   if (!tile.name) return
+  activeSerial = tile.serial
   if (event.button === 2) {
     sendControl(tile, 'back')
     return
@@ -452,6 +484,7 @@ function disconnectTile(tile: Tile) {
   tile.hasVideo = false
   tile.name = ''
   tile.status = '已断开'
+  if (activeSerial === tile.serial) activeSerial = ''
   if (wasConnected) {
     void sendScreenLinkCmd(tile.serial, 'end').catch(() => {})
   }
