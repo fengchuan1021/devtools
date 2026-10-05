@@ -87,6 +87,24 @@ export async function getXmlLayout(serial) {
   return request.getText(url)
 }
 
+export async function installDroppedApk(serial, file) {
+  if (!serial) throw new Error('serial required')
+  if (!(file instanceof File)) throw new Error('apk required')
+  const body = new FormData()
+  body.append('serial', serial)
+  body.append('file', file)
+  const headers = new Headers()
+  const token = getItem('token')
+  if (token) headers.set('token', token)
+  const res = await fetch(`${API_BASE}/api/dev/installApk`, { method: 'POST', headers, body })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const message = typeof data.error === 'string' && data.error ? data.error : '安装失败'
+    throw new Error(message)
+  }
+  return data
+}
+
 export async function sendScreenLinkCmd(serial, cmdtype) {
   if (!serial) throw new Error('serial required')
   if (cmdtype !== 'begin' && cmdtype !== 'end') throw new Error('cmdtype required')

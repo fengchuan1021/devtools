@@ -2,7 +2,7 @@
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { sendScreenLinkCmd } from '../api/device'
+import { installDroppedApk, sendScreenLinkCmd } from '../api/device'
 import request from '../utils/request'
 
 interface DeviceGroup {
@@ -43,10 +43,12 @@ const devicesReady = ref(false)
 const groups = ref<DeviceGroup[]>([])
 const selectedGroup = ref<number | 'all'>('all')
 const deviceQuery = ref('')
+const dragOverSerial = ref('')
 const tiles = ref<Tile[]>([])
 const tileWidth = ref(240)
 const tileHeight = ref(288)
 const sessions = new Map<string, Session>()
+const heldKeys = new Map<string, number>()
 let activeSerial = ''
 let resizing = false
 let resizeOrigin = { x: 0, y: 0, width: 0, height: 0 }
@@ -62,11 +64,15 @@ const visibleTiles = computed(() => {
 
 onMounted(() => {
   window.addEventListener('keydown', onShortcutKey, true)
+  window.addEventListener('keyup', onShortcutKey, true)
+  window.addEventListener('blur', releaseHeldKeys)
   void Promise.all([loadWebRTCConfig(), loadDevices()])
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onShortcutKey, true)
+  window.removeEventListener('keyup', onShortcutKey, true)
+  window.removeEventListener('blur', releaseHeldKeys)
   for (const tile of tiles.value) disconnectTile(tile)
 })
 
@@ -365,7 +371,6 @@ function shortcutTile() {
 }
 
 function onShortcutKey(event: KeyboardEvent) {
-  if (!event.altKey || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey) return
   const target = event.target
   if (
     target instanceof HTMLElement &&
@@ -373,13 +378,72 @@ function onShortcutKey(event: KeyboardEvent) {
   ) {
     return
   }
-  const action =
-    event.code === 'KeyH' ? 'home' : event.code === 'KeyS' ? 'recents' : event.code === 'KeyB' ? 'back' : ''
-  if (!action) return
+  if (event.type === 'keydown' && event.altKey && !event.repeat && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+    const action =
+      event.code === 'KeyH' ? 'home' : event.code === 'KeyS' ? 'recents' : event.code === 'KeyB' ? 'back' : ''
+    if (!action) return
+    const tile = shortcutTile()
+    if (!tile) return
+    event.preventDefault()
+    sendControl(tile, action)
+    return
+  }
+  if (event.type !== 'keydown' && event.type !== 'keyup') return
+  if (event.altKey || event.ctrlKey || event.metaKey) return
+  const key = controlKey(event.code)
+  if (!key) return
   const tile = shortcutTile()
   if (!tile) return
   event.preventDefault()
-  sendControl(tile, action)
+  if (event.type === 'keydown') {
+    const repeat = event.repeat ? (heldKeys.get(key) ?? 0) + 1 : 0
+    heldKeys.set(key, repeat)
+    sendKey(tile, key, event.shiftKey, true, repeat)
+    return
+  }
+  if (!heldKeys.has(key)) return
+  heldKeys.delete(key)
+  sendKey(tile, key, event.shiftKey, false, 0)
+}
+
+function releaseHeldKeys() {
+  const tile = shortcutTile()
+  const keys = [...heldKeys.keys()]
+  heldKeys.clear()
+  if (!tile) return
+  for (const key of keys) sendKey(tile, key, false, false, 0)
+}
+
+const NAMED_KEYS = new Set([
+  'Backspace',
+  'Enter',
+  'NumpadEnter',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Space',
+  'Tab',
+  'Escape',
+  'Delete',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+])
+
+function controlKey(code: string) {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  if (code === 'ShiftLeft' || code === 'ShiftRight') return 'Shift'
+  return NAMED_KEYS.has(code) ? code : ''
+}
+
+function sendKey(tile: Tile, key: string, shift: boolean, down: boolean, repeat: number) {
+  const session = sessions.get(tile.serial)
+  if (!tile.name || session?.socket?.readyState !== WebSocket.OPEN) return
+  activeSerial = tile.serial
+  session.socket.send(JSON.stringify({ type: 'control', action: 'key', key, shift, down, repeat }))
 }
 
 function videoPoint(event: MouseEvent) {
@@ -482,6 +546,38 @@ function onResizeUp() {
   resizing = false
 }
 
+function onApkDragOver(tile: Tile, event: DragEvent) {
+  const types = event.dataTransfer?.types
+  if (!types || !Array.from(types).includes('Files')) return
+  event.preventDefault()
+  dragOverSerial.value = tile.serial
+}
+
+function onApkDragLeave(tile: Tile, event: DragEvent) {
+  const next = event.relatedTarget
+  const current = event.currentTarget
+  if (next instanceof Node && current instanceof Node && current.contains(next)) return
+  if (dragOverSerial.value === tile.serial) dragOverSerial.value = ''
+}
+
+async function onApkDrop(tile: Tile, event: DragEvent) {
+  event.preventDefault()
+  dragOverSerial.value = ''
+  const file = Array.from(event.dataTransfer?.files ?? []).find((item) => item.name.toLowerCase().endsWith('.apk'))
+  if (!file) {
+    tile.status = '请拖入 apk'
+    return
+  }
+  tile.status = `正在安装 ${file.name}`
+  try {
+    const body = await installDroppedApk(tile.serial, file)
+    const result = typeof body.data === 'string' ? body.data.trim() : ''
+    tile.status = result.includes('Success') ? '安装成功' : result || '安装失败'
+  } catch (error) {
+    tile.status = error instanceof Error ? error.message : '安装失败'
+  }
+}
+
 function disconnectTile(tile: Tile) {
   const wasConnected = tile.connected
   const session = sessions.get(tile.serial)
@@ -539,8 +635,12 @@ function disconnectTile(tile: Tile) {
       <article
         v-for="tile in visibleTiles"
         :key="tile.serial"
-        class="relative flex flex-col gap-2 rounded-md border border-surface p-2"
+        class="relative flex flex-col gap-2 rounded-md border p-2"
+        :class="dragOverSerial === tile.serial ? 'border-primary bg-primary/10' : 'border-surface'"
         :style="{ width: `${tileWidth}px` }"
+        @dragover="onApkDragOver(tile, $event)"
+        @dragleave="onApkDragLeave(tile, $event)"
+        @drop="onApkDrop(tile, $event)"
       >
         <div class="flex items-center gap-2">
           <p class="min-w-0 flex-1 truncate text-sm" :title="tile.label">{{ tile.label }}</p>
