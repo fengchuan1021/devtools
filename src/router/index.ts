@@ -6,6 +6,7 @@ import ScreenView from '../views/ScreenView.vue'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import { useUserStore } from '../stores/user'
+import ServerListView from '../views/ServerListView.vue'
 
 const publicNames = new Set(['login', 'register'])
 
@@ -47,6 +48,11 @@ const router = createRouter({
           path: 'screen',
           name: 'screen',
           component: ScreenView,
+        },
+        {
+          path: 'server',
+          name: 'server',
+          component: ServerListView,
         },
       ],
     },
