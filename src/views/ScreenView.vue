@@ -3,6 +3,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { installDroppedApk, sendScreenLinkCmd } from '../api/device'
+import DeviceMetaEditor from '../components/DeviceMetaEditor.vue'
 import request from '../utils/request'
 
 interface DeviceGroup {
@@ -36,6 +37,8 @@ interface Session {
   generation: number
 }
 
+const deviceEditorVisible = ref(false)
+const deviceEditorSerial = ref('')
 const relay = ref('')
 const stun = ref('')
 const pageStatus = ref('')
@@ -578,6 +581,11 @@ async function onApkDrop(tile: Tile, event: DragEvent) {
   }
 }
 
+function editTile(tile: Tile) {
+  deviceEditorSerial.value = tile.serial
+  deviceEditorVisible.value = true
+}
+
 function disconnectTile(tile: Tile) {
   const wasConnected = tile.connected
   const session = sessions.get(tile.serial)
@@ -707,5 +715,6 @@ function disconnectTile(tile: Tile) {
         </div>
       </article>
     </div>
+    <DeviceMetaEditor v-model:visible="deviceEditorVisible" :serial="deviceEditorSerial" @saved="loadDevices" />
   </section>
 </template>

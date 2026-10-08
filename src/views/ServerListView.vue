@@ -13,6 +13,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { sendScreenLinkCmd } from '../api/device'
+import DeviceMetaEditor from '../components/DeviceMetaEditor.vue'
 import {
   listRedroidServers,
   getRedroidServer,
@@ -98,6 +99,8 @@ const locationPoint = ref(null)
 const mapEl = ref(null)
 let locationMap = null
 let locationMarker = null
+const deviceEditorVisible = ref(false)
+const deviceEditorSerial = ref('')
 const screenVisible = ref(false)
 const screenHint = ref('')
 const screenStatus = ref('')
@@ -478,6 +481,16 @@ function syncScreenRatio(event) {
   const video = event.target
   if (!(video instanceof HTMLVideoElement) || video.videoWidth <= 0 || video.videoHeight <= 0) return
   screenRatio.value = video.videoWidth / video.videoHeight
+}
+
+function openContainerEdit(item) {
+  const serial = String(item?.serial || '').trim()
+  if (!serial) {
+    showScreenHint('容器没有序列号')
+    return
+  }
+  deviceEditorSerial.value = serial
+  deviceEditorVisible.value = true
 }
 
 function openContainerScreen(item) {
@@ -998,6 +1011,8 @@ onUnmounted(() => {
         <Button label="保存" :disabled="!locationPoint" :loading="locationSaving" @click="confirmLocation" />
       </template>
     </Dialog>
+
+    <DeviceMetaEditor v-model:visible="deviceEditorVisible" :serial="deviceEditorSerial" />
 
     <Dialog
       v-model:visible="screenVisible"
