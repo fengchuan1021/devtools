@@ -644,6 +644,11 @@ function disconnectTile(tile: Tile) {
       >
         <div class="flex items-center gap-2">
           <p class="min-w-0 flex-1 truncate text-sm" :title="tile.label">{{ tile.label }}</p>
+          
+          <span v-tooltip.top="'编辑'" class="inline-flex">
+            <Button icon="pi pi-pencil" rounded outlined size="small" aria-label="编辑" @click="editTile(tile)" />
+          </span>
+
           <span v-tooltip.top="'连接'" class="inline-flex">
             <Button icon="pi pi-link" rounded outlined size="small" aria-label="连接" :disabled="tile.connected" :class="tile.connected ? 'pointer-events-none' : ''" @click="connectTile(tile)" />
           </span>

@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
@@ -12,6 +12,7 @@ import 'leaflet/dist/leaflet.css'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
+import { sendScreenLinkCmd } from '../api/device'
 import {
   listRedroidServers,
   getRedroidServer,
@@ -24,6 +25,7 @@ import {
   getRedroidContainerLocation,
   updateRedroidContainerLocation
 } from '../api/redroidServer'
+import request from '../utils/request'
 
 const PI = Math.PI
 const GCJ_A = 6378245.0
@@ -96,6 +98,19 @@ const locationPoint = ref(null)
 const mapEl = ref(null)
 let locationMap = null
 let locationMarker = null
+const screenVisible = ref(false)
+const screenHint = ref('')
+const screenStatus = ref('')
+const screenTitle = ref('')
+const screenSerial = ref('')
+const screenHasVideo = ref(false)
+const screenRatio = ref(9 / 16)
+const screenPeerName = ref('')
+const screenConnected = ref(false)
+const relay = ref('')
+const stun = ref('')
+let screenSession = null
+let screenHintTimer = 0
 
 const form = ref(emptyForm())
 const expireDate = ref(null)
@@ -415,6 +430,361 @@ async function confirmLocation() {
   }
 }
 
+function showScreenHint(text) {
+  screenHint.value = text
+  window.clearTimeout(screenHintTimer)
+  screenHintTimer = window.setTimeout(() => {
+    if (screenHint.value === text) screenHint.value = ''
+  }, 3000)
+}
+
+function emptyScreenSession() {
+  return {
+    socket: undefined,
+    peer: undefined,
+    pending: [],
+    remoteSet: false,
+    pressing: false,
+    lastPoint: undefined,
+    moveTimer: undefined,
+    video: undefined,
+    stream: undefined,
+    generation: 0
+  }
+}
+
+async function loadWebRTCConfig() {
+  try {
+    const data = await request.get('/api/getwebrtcconfig')
+    relay.value = (data?.relay || '').trim()
+    stun.value = (data?.stun || '').trim()
+  } catch {
+    relay.value = ''
+    stun.value = ''
+  }
+}
+
+function setScreenVideo(element) {
+  if (!(element instanceof HTMLVideoElement)) return
+  if (!screenSession) screenSession = emptyScreenSession()
+  screenSession.video = element
+  if (screenSession.stream && element.srcObject !== screenSession.stream) {
+    element.srcObject = screenSession.stream
+    void element.play().catch(() => {})
+  }
+}
+
+function syncScreenRatio(event) {
+  const video = event.target
+  if (!(video instanceof HTMLVideoElement) || video.videoWidth <= 0 || video.videoHeight <= 0) return
+  screenRatio.value = video.videoWidth / video.videoHeight
+}
+
+function openContainerScreen(item) {
+  if (!item?.running) {
+    showScreenHint('请先启动容器')
+    return
+  }
+  const serial = String(item.serial || '').trim()
+  if (!serial) {
+    showScreenHint('容器没有序列号')
+    return
+  }
+  if (screenVisible.value && screenSerial.value === serial) return
+  const keepVideo = screenVisible.value ? screenSession?.video : undefined
+  if (screenVisible.value) disconnectScreen()
+  screenSerial.value = serial
+  screenTitle.value = item.name || serial
+  screenStatus.value = ''
+  screenHasVideo.value = false
+  screenPeerName.value = ''
+  screenRatio.value = 9 / 16
+  screenConnected.value = false
+  screenHint.value = ''
+  screenSession = emptyScreenSession()
+  if (keepVideo instanceof HTMLVideoElement) screenSession.video = keepVideo
+  screenVisible.value = true
+  void connectScreen()
+}
+
+async function connectScreen() {
+  const serial = screenSerial.value
+  if (!serial || screenConnected.value) return
+  if (!relay.value || !stun.value) await loadWebRTCConfig()
+  if (!screenVisible.value || screenSerial.value !== serial) return
+  if (!relay.value || !stun.value) {
+    screenStatus.value = '画面配置未就绪'
+    return
+  }
+  const session = screenSession || emptyScreenSession()
+  screenSession = session
+  const generation = ++session.generation
+  session.remoteSet = false
+  session.pending = []
+  screenPeerName.value = ''
+  screenHasVideo.value = false
+  screenStatus.value = '正在通知手机'
+  screenConnected.value = true
+  try {
+    await sendScreenLinkCmd(serial, 'begin')
+  } catch {
+    if (session.generation === generation) {
+      screenConnected.value = false
+      screenStatus.value = '通知手机失败'
+    }
+    return
+  }
+  if (session.generation !== generation) {
+    void sendScreenLinkCmd(serial, 'end').catch(() => {})
+    return
+  }
+  screenStatus.value = '正在连接中继'
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const current = new WebSocket(`${protocol}//${location.host}/screenlink`)
+  session.socket = current
+  current.onopen = () => {
+    if (session.socket !== current) return
+    screenStatus.value = '正在等待手机'
+    current.send(JSON.stringify({ type: 'join', code: serial }))
+  }
+  current.onmessage = (event) => {
+    if (session.socket !== current || typeof event.data !== 'string') return
+    void onScreenSignal(serial, event.data)
+  }
+  current.onerror = () => {
+    if (session.socket === current) screenStatus.value = '中继连接失败'
+  }
+  current.onclose = () => {
+    if (session.socket !== current) return
+    session.socket = undefined
+    closeScreenPeer()
+    screenConnected.value = false
+    screenHasVideo.value = false
+    screenPeerName.value = ''
+    screenStatus.value = '信令已断开'
+    void sendScreenLinkCmd(serial, 'end').catch(() => {})
+  }
+}
+
+async function onScreenSignal(serial, text) {
+  let message
+  try {
+    message = JSON.parse(text)
+  } catch {
+    return
+  }
+  const session = screenSession
+  if (!session || screenSerial.value !== serial) return
+  if (message.type === 'waiting') {
+    screenStatus.value = '等待手机登记'
+    return
+  }
+  if (message.type === 'joined') {
+    screenPeerName.value = message.name || '手机'
+    screenStatus.value = '正在建立画面'
+    openScreenPeer()
+    return
+  }
+  if (message.type === 'error') {
+    screenStatus.value = message.message || '信令错误'
+    return
+  }
+  if (message.type === 'peer-left') {
+    screenStatus.value = '手机已断开'
+    screenPeerName.value = ''
+    screenHasVideo.value = false
+    closeScreenPeer()
+    return
+  }
+  if (message.type === 'shot') {
+    screenStatus.value = message.ok ? '截图已保存到手机 Download' : '截图失败'
+    return
+  }
+  if (!session.peer) return
+  if (message.type === 'offer' && message.sdp) {
+    await session.peer.setRemoteDescription({ type: 'offer', sdp: message.sdp })
+    session.remoteSet = true
+    for (const candidate of session.pending) {
+      await session.peer.addIceCandidate(candidate)
+    }
+    session.pending = []
+    const answer = await session.peer.createAnswer()
+    await session.peer.setLocalDescription(answer)
+    session.socket?.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }))
+    return
+  }
+  if (message.type === 'candidate' && message.candidate) {
+    const candidate = {
+      candidate: message.candidate,
+      sdpMid: message.sdpMid,
+      sdpMLineIndex: message.sdpMLineIndex
+    }
+    if (!session.remoteSet) {
+      session.pending.push(candidate)
+    } else {
+      await session.peer.addIceCandidate(candidate)
+    }
+  }
+}
+
+function openScreenPeer() {
+  const session = screenSession
+  if (!session) return
+  session.peer?.close()
+  const connection = new RTCPeerConnection({
+    iceServers: [{ urls: stun.value }]
+  })
+  session.peer = connection
+  connection.ontrack = (event) => {
+    const stream = event.streams[0] ?? new MediaStream([event.track])
+    session.stream = stream
+    screenHasVideo.value = true
+    if (session.video) {
+      session.video.srcObject = stream
+      void session.video.play().catch(() => {})
+    }
+    screenStatus.value = '正在接收画面'
+  }
+  connection.onicecandidate = (event) => {
+    if (!event.candidate || session.socket?.readyState !== WebSocket.OPEN) return
+    session.socket.send(
+      JSON.stringify({
+        type: 'candidate',
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid,
+        sdpMLineIndex: event.candidate.sdpMLineIndex
+      })
+    )
+  }
+  connection.oniceconnectionstatechange = () => {
+    if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
+      screenStatus.value = '画面通道已建立'
+    } else if (connection.iceConnectionState === 'failed') {
+      screenStatus.value = 'UDP 打洞失败'
+    }
+  }
+}
+
+function closeScreenPeer() {
+  const session = screenSession
+  if (!session) return
+  const video = session.video
+  const stream = session.stream
+  session.peer?.close()
+  session.peer = undefined
+  session.stream = undefined
+  session.remoteSet = false
+  session.pending = []
+  if (video && video.srcObject === stream) video.srcObject = null
+}
+
+function sendScreenControl(action) {
+  const session = screenSession
+  if (!screenPeerName.value || session?.socket?.readyState !== WebSocket.OPEN) return
+  session.socket.send(JSON.stringify({ type: 'control', action }))
+}
+
+function screenVideoPoint(event) {
+  const video = event.currentTarget
+  if (!(video instanceof HTMLVideoElement)) return
+  const rect = video.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  return {
+    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
+  }
+}
+
+function sendScreenTouch(phase, x, y) {
+  const session = screenSession
+  if (!screenPeerName.value || session?.socket?.readyState !== WebSocket.OPEN) return
+  session.socket.send(JSON.stringify({ type: 'control', action: 'touch', phase, x, y }))
+}
+
+function onScreenPointerDown(event) {
+  if (!screenPeerName.value) return
+  if (event.button === 2) {
+    sendScreenControl('back')
+    return
+  }
+  if (event.button === 1) {
+    sendScreenControl('home')
+    return
+  }
+  if (event.button !== 0) return
+  const point = screenVideoPoint(event)
+  if (!point || !screenSession) return
+  screenSession.pressing = true
+  screenSession.lastPoint = point
+  sendScreenTouch('down', point.x, point.y)
+  try {
+    event.currentTarget.setPointerCapture(event.pointerId)
+  } catch {
+    // 非用户手势时捕获会失败，触摸已经发出
+  }
+}
+
+function onScreenPointerMove(event) {
+  const session = screenSession
+  if (!session?.pressing) return
+  const point = screenVideoPoint(event)
+  if (!point) return
+  session.lastPoint = point
+  if (session.moveTimer != null) return
+  session.moveTimer = window.setTimeout(() => {
+    session.moveTimer = undefined
+    if (session.pressing && session.lastPoint) {
+      sendScreenTouch('move', session.lastPoint.x, session.lastPoint.y)
+    }
+  }, 16)
+}
+
+function onScreenPointerUp(event) {
+  const session = screenSession
+  if (!session?.pressing || (event.type !== 'pointercancel' && event.button !== 0)) return
+  session.pressing = false
+  if (session.moveTimer != null) {
+    window.clearTimeout(session.moveTimer)
+    session.moveTimer = undefined
+  }
+  const point = screenVideoPoint(event) ?? session.lastPoint
+  if (point) sendScreenTouch('up', point.x, point.y)
+}
+
+function onScreenWheel(event) {
+  const session = screenSession
+  const point = screenVideoPoint(event)
+  if (!point || !screenPeerName.value || session?.socket?.readyState !== WebSocket.OPEN) return
+  const dx = Math.max(-1, Math.min(1, event.deltaX / 120))
+  const dy = Math.max(-1, Math.min(1, -event.deltaY / 120))
+  if (dx === 0 && dy === 0) return
+  session.socket.send(JSON.stringify({ type: 'control', action: 'scroll', x: point.x, y: point.y, dx, dy }))
+}
+
+function disconnectScreen() {
+  const serial = screenSerial.value
+  const wasConnected = screenConnected.value
+  const session = screenSession
+  if (session) {
+    session.generation += 1
+    const current = session.socket
+    session.socket = undefined
+    current?.close()
+    if (session.moveTimer != null) {
+      window.clearTimeout(session.moveTimer)
+      session.moveTimer = undefined
+    }
+    session.pressing = false
+    closeScreenPeer()
+  }
+  screenConnected.value = false
+  screenHasVideo.value = false
+  screenPeerName.value = ''
+  if (wasConnected && serial) {
+    void sendScreenLinkCmd(serial, 'end').catch(() => {})
+  }
+}
+
 function askDelete(row) {
   pendingDelete.value = row
 }
@@ -443,6 +813,12 @@ async function confirmDelete() {
 
 onMounted(() => {
   loadList()
+  void loadWebRTCConfig()
+})
+
+onUnmounted(() => {
+  window.clearTimeout(screenHintTimer)
+  disconnectScreen()
 })
 </script>
 
@@ -452,6 +828,8 @@ onMounted(() => {
       <span class="text-sm font-medium">服务器列表</span>
       <Button label="添加服务器" icon="pi pi-plus" size="small" @click="openAdd" />
     </header>
+
+    <Message v-if="screenHint" severity="warn" :closable="false" class="mx-3 mt-3">{{ screenHint }}</Message>
 
     <div class="min-h-0 flex-1 overflow-auto p-3">
       <Message v-if="listError" severity="error" :closable="false" class="mb-3">{{ listError }}</Message>
@@ -493,6 +871,7 @@ onMounted(() => {
                       :severity="item.running ? 'success' : 'secondary'"
                     />
                     <span>{{ item.name || item.id }}</span>
+                    <span>{{ item.serial }}</span>
                     <Button
                       v-if="item.name"
                       v-tooltip.top="'位置'"
@@ -529,6 +908,28 @@ onMounted(() => {
                       :disabled="!!containerAction(row.id, item.name)"
                       :loading="containerAction(row.id, item.name) === 'stop'"
                       @click="runContainerAction(row, item, 'stop')"
+                    />
+                    <Button
+                      v-if="item.name"
+                      v-tooltip.top="'编辑'"
+                      icon="pi pi-pencil"
+                      text
+                      rounded
+                      size="small"
+                      severity="secondary"
+                      aria-label="编辑"
+                      @click="openContainerEdit(item)"
+                    />
+                    <Button
+                      v-if="item.name"
+                      v-tooltip.top="'连接'"
+                      icon="pi pi-link"
+                      text
+                      rounded
+                      size="small"
+                      severity="secondary"
+                      aria-label="连接"
+                      @click="openContainerScreen(item)"
                     />
                   </li>
                 </ul>
@@ -596,6 +997,44 @@ onMounted(() => {
         <Button label="取消" severity="secondary" text @click="closeLocation" />
         <Button label="保存" :disabled="!locationPoint" :loading="locationSaving" @click="confirmLocation" />
       </template>
+    </Dialog>
+
+    <Dialog
+      v-model:visible="screenVisible"
+      :header="screenTitle ? `容器画面 · ${screenTitle}` : '容器画面'"
+      modal
+      :style="{ width: '420px' }"
+      @hide="disconnectScreen"
+    >
+      <div class="flex flex-col gap-3">
+        <div class="flex h-[640px] items-center justify-center overflow-hidden rounded-md bg-black">
+          <i v-show="!screenHasVideo" class="pi pi-image text-4xl text-muted-color" aria-label="等待画面" />
+          <video
+            v-show="screenHasVideo"
+            :ref="setScreenVideo"
+            autoplay
+            playsinline
+            muted
+            class="max-h-full bg-black touch-none select-none"
+            :aria-label="screenTitle || '容器画面'"
+            :style="{ aspectRatio: String(screenRatio), height: '100%' }"
+            @loadedmetadata="syncScreenRatio"
+            @pointerdown.prevent="onScreenPointerDown"
+            @pointermove="onScreenPointerMove"
+            @pointerup="onScreenPointerUp"
+            @pointercancel="onScreenPointerUp"
+            @contextmenu.prevent
+            @wheel.prevent="onScreenWheel"
+          />
+        </div>
+        <div class="flex justify-center gap-1">
+          <Button icon="pi pi-arrow-left" rounded outlined aria-label="返回" size="small" :disabled="!screenPeerName" @click="sendScreenControl('back')" />
+          <Button icon="pi pi-home" rounded outlined aria-label="主页" size="small" :disabled="!screenPeerName" @click="sendScreenControl('home')" />
+          <Button icon="pi pi-clone" rounded outlined aria-label="最近任务" size="small" :disabled="!screenPeerName" @click="sendScreenControl('recents')" />
+          <Button icon="pi pi-camera" rounded outlined aria-label="截图" size="small" :disabled="!screenPeerName" @click="sendScreenControl('shot')" />
+        </div>
+        <p class="truncate text-xs text-muted-color">{{ screenStatus }}</p>
+      </div>
     </Dialog>
 
     <Dialog
