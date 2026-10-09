@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { markRaw, nextTick, onActivated, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
@@ -14,6 +14,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { sendScreenLinkCmd } from '../api/device'
 import DeviceMetaEditor from '../components/DeviceMetaEditor.vue'
+import DeviceTerminalHost from '../components/DeviceTerminalHost.vue'
 import {
   listRedroidServers,
   getRedroidServer,
@@ -100,19 +101,13 @@ const mapEl = ref(null)
 let locationMap = null
 let locationMarker = null
 const deviceEditorVisible = ref(false)
+const terminalHost = ref(null)
 const deviceEditorSerial = ref('')
-const screenVisible = ref(false)
+const screens = ref([])
 const screenHint = ref('')
-const screenStatus = ref('')
-const screenTitle = ref('')
-const screenSerial = ref('')
-const screenHasVideo = ref(false)
-const screenRatio = ref(9 / 16)
-const screenPeerName = ref('')
-const screenConnected = ref(false)
 const relay = ref('')
 const stun = ref('')
-let screenSession = null
+let screenSeq = 0
 let screenHintTimer = 0
 
 const form = ref(emptyForm())
@@ -442,7 +437,7 @@ function showScreenHint(text) {
 }
 
 function emptyScreenSession() {
-  return {
+  return markRaw({
     socket: undefined,
     peer: undefined,
     pending: [],
@@ -453,7 +448,7 @@ function emptyScreenSession() {
     video: undefined,
     stream: undefined,
     generation: 0
-  }
+  })
 }
 
 async function loadWebRTCConfig() {
@@ -467,20 +462,20 @@ async function loadWebRTCConfig() {
   }
 }
 
-function setScreenVideo(element) {
+function setScreenVideo(screen, element) {
   if (!(element instanceof HTMLVideoElement)) return
-  if (!screenSession) screenSession = emptyScreenSession()
-  screenSession.video = element
-  if (screenSession.stream && element.srcObject !== screenSession.stream) {
-    element.srcObject = screenSession.stream
+  const session = screen.session
+  session.video = element
+  if (session.stream && element.srcObject !== session.stream) {
+    element.srcObject = session.stream
     void element.play().catch(() => {})
   }
 }
 
-function syncScreenRatio(event) {
+function syncScreenRatio(screen, event) {
   const video = event.target
   if (!(video instanceof HTMLVideoElement) || video.videoWidth <= 0 || video.videoHeight <= 0) return
-  screenRatio.value = video.videoWidth / video.videoHeight
+  screen.ratio = video.videoWidth / video.videoHeight
 }
 
 function openContainerEdit(item) {
@@ -493,6 +488,15 @@ function openContainerEdit(item) {
   deviceEditorVisible.value = true
 }
 
+function openContainerTerminal(item) {
+  const serial = String(item?.serial || '').trim()
+  if (!serial) {
+    showScreenHint('容器没有序列号')
+    return
+  }
+  terminalHost.value?.openTerminal(serial)
+}
+
 function openContainerScreen(item) {
   if (!item?.running) {
     showScreenHint('请先启动容器')
@@ -503,47 +507,78 @@ function openContainerScreen(item) {
     showScreenHint('容器没有序列号')
     return
   }
-  if (screenVisible.value && screenSerial.value === serial) return
-  const keepVideo = screenVisible.value ? screenSession?.video : undefined
-  if (screenVisible.value) disconnectScreen()
-  screenSerial.value = serial
-  screenTitle.value = item.name || serial
-  screenStatus.value = ''
-  screenHasVideo.value = false
-  screenPeerName.value = ''
-  screenRatio.value = 9 / 16
-  screenConnected.value = false
-  screenHint.value = ''
-  screenSession = emptyScreenSession()
-  if (keepVideo instanceof HTMLVideoElement) screenSession.video = keepVideo
-  screenVisible.value = true
-  void connectScreen()
+  if (screens.value.some((screen) => screen.visible && screen.serial === serial)) return
+  const screen = {
+    id: ++screenSeq,
+    visible: true,
+    serial,
+    title: item.name || serial,
+    status: '',
+    hasVideo: false,
+    ratio: 9 / 16,
+    peerName: '',
+    connected: false,
+    slot: screens.value.length,
+    session: emptyScreenSession()
+  }
+  screens.value.push(screen)
+  void connectScreen(screen)
 }
 
-async function connectScreen() {
-  const serial = screenSerial.value
-  if (!serial || screenConnected.value) return
+function screenDialogStyle(screen) {
+  const col = screen.slot % 3
+  const row = Math.floor(screen.slot / 3) % 3
+  return {
+    width: '420px',
+    position: 'fixed',
+    margin: '0',
+    left: `${16 + col * 436}px`,
+    top: `${64 + row * 72}px`
+  }
+}
+
+let screenLayer = 1200
+
+function raiseScreenDialog(event) {
+  const mask = event.currentTarget?.parentElement
+  if (!(mask instanceof HTMLElement)) return
+  mask.style.zIndex = String(++screenLayer)
+}
+
+function closeScreen(screen) {
+  if (!screen.visible) return
+  screen.visible = false
+  disconnectScreen(screen)
+}
+
+function removeScreen(screen) {
+  const index = screens.value.findIndex((item) => item.id === screen.id)
+  if (index >= 0) screens.value.splice(index, 1)
+}
+
+async function connectScreen(screen) {
+  const serial = screen.serial
+  if (!serial || screen.connected) return
   if (!relay.value || !stun.value) await loadWebRTCConfig()
-  if (!screenVisible.value || screenSerial.value !== serial) return
+  if (!screen.visible || screen.serial !== serial) return
   if (!relay.value || !stun.value) {
-    screenStatus.value = '画面配置未就绪'
+    screen.status = '画面配置未就绪'
     return
   }
-  const session = screenSession || emptyScreenSession()
-  screenSession = session
+  const session = screen.session
   const generation = ++session.generation
   session.remoteSet = false
   session.pending = []
-  screenPeerName.value = ''
-  screenHasVideo.value = false
-  screenStatus.value = '正在通知手机'
-  screenConnected.value = true
+  screen.peerName = ''
+  screen.hasVideo = false
+  screen.status = '正在通知手机'
+  screen.connected = true
   try {
     await sendScreenLinkCmd(serial, 'begin')
   } catch {
     if (session.generation === generation) {
-      screenConnected.value = false
-      screenStatus.value = '通知手机失败'
+      screen.connected = false
+      screen.status = '通知手机失败'
     }
     return
   }
@@ -551,66 +586,66 @@ async function connectScreen() {
     void sendScreenLinkCmd(serial, 'end').catch(() => {})
     return
   }
-  screenStatus.value = '正在连接中继'
+  screen.status = '正在连接中继'
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const current = new WebSocket(`${protocol}//${location.host}/screenlink`)
   session.socket = current
   current.onopen = () => {
     if (session.socket !== current) return
-    screenStatus.value = '正在等待手机'
+    screen.status = '正在等待手机'
     current.send(JSON.stringify({ type: 'join', code: serial }))
   }
   current.onmessage = (event) => {
     if (session.socket !== current || typeof event.data !== 'string') return
-    void onScreenSignal(serial, event.data)
+    void onScreenSignal(screen, event.data)
   }
   current.onerror = () => {
-    if (session.socket === current) screenStatus.value = '中继连接失败'
+    if (session.socket === current) screen.status = '中继连接失败'
   }
   current.onclose = () => {
     if (session.socket !== current) return
     session.socket = undefined
-    closeScreenPeer()
-    screenConnected.value = false
-    screenHasVideo.value = false
-    screenPeerName.value = ''
-    screenStatus.value = '信令已断开'
+    closeScreenPeer(screen)
+    screen.connected = false
+    screen.hasVideo = false
+    screen.peerName = ''
+    screen.status = '信令已断开'
     void sendScreenLinkCmd(serial, 'end').catch(() => {})
   }
 }
 
-async function onScreenSignal(serial, text) {
+async function onScreenSignal(screen, text) {
   let message
   try {
     message = JSON.parse(text)
   } catch {
     return
   }
-  const session = screenSession
-  if (!session || screenSerial.value !== serial) return
+  const session = screen.session
+  if (!session || !screen.visible) return
   if (message.type === 'waiting') {
-    screenStatus.value = '等待手机登记'
+    screen.status = '等待手机登记'
     return
   }
   if (message.type === 'joined') {
-    screenPeerName.value = message.name || '手机'
-    screenStatus.value = '正在建立画面'
-    openScreenPeer()
+    screen.peerName = message.name || '手机'
+    screen.status = '正在建立画面'
+    openScreenPeer(screen)
     return
   }
   if (message.type === 'error') {
-    screenStatus.value = message.message || '信令错误'
+    screen.status = message.message || '信令错误'
     return
   }
   if (message.type === 'peer-left') {
-    screenStatus.value = '手机已断开'
-    screenPeerName.value = ''
-    screenHasVideo.value = false
-    closeScreenPeer()
+    screen.status = '手机已断开'
+    screen.peerName = ''
+    screen.hasVideo = false
+    closeScreenPeer(screen)
     return
   }
   if (message.type === 'shot') {
-    screenStatus.value = message.ok ? '截图已保存到手机 Download' : '截图失败'
+    screen.status = message.ok ? '截图已保存到手机 Download' : '截图失败'
     return
   }
   if (!session.peer) return
@@ -640,8 +675,8 @@ async function onScreenSignal(serial, text) {
   }
 }
 
-function openScreenPeer() {
-  const session = screenSession
+function openScreenPeer(screen) {
+  const session = screen.session
   if (!session) return
   session.peer?.close()
   const connection = new RTCPeerConnection({
@@ -651,12 +686,12 @@ function openScreenPeer() {
   connection.ontrack = (event) => {
     const stream = event.streams[0] ?? new MediaStream([event.track])
     session.stream = stream
-    screenHasVideo.value = true
+    screen.hasVideo = true
     if (session.video) {
       session.video.srcObject = stream
       void session.video.play().catch(() => {})
     }
-    screenStatus.value = '正在接收画面'
+    screen.status = '正在接收画面'
   }
   connection.onicecandidate = (event) => {
     if (!event.candidate || session.socket?.readyState !== WebSocket.OPEN) return
@@ -671,15 +706,15 @@ function openScreenPeer() {
   }
   connection.oniceconnectionstatechange = () => {
     if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
-      screenStatus.value = '画面通道已建立'
+      screen.status = '画面通道已建立'
     } else if (connection.iceConnectionState === 'failed') {
-      screenStatus.value = 'UDP 打洞失败'
+      screen.status = 'UDP 打洞失败'
     }
   }
 }
 
-function closeScreenPeer() {
-  const session = screenSession
+function closeScreenPeer(screen) {
+  const session = screen.session
   if (!session) return
   const video = session.video
   const stream = session.stream
@@ -691,9 +726,9 @@ function closeScreenPeer() {
   if (video && video.srcObject === stream) video.srcObject = null
 }
 
-function sendScreenControl(action) {
-  const session = screenSession
-  if (!screenPeerName.value || session?.socket?.readyState !== WebSocket.OPEN) return
+function sendScreenControl(screen, action) {
+  const session = screen.session
+  if (!screen.peerName || session?.socket?.readyState !== WebSocket.OPEN) return
   session.socket.send(JSON.stringify({ type: 'control', action }))
 }
 
@@ -708,28 +743,28 @@ function screenVideoPoint(event) {
   }
 }
 
-function sendScreenTouch(phase, x, y) {
-  const session = screenSession
-  if (!screenPeerName.value || session?.socket?.readyState !== WebSocket.OPEN) return
+function sendScreenTouch(screen, phase, x, y) {
+  const session = screen.session
+  if (!screen.peerName || session?.socket?.readyState !== WebSocket.OPEN) return
   session.socket.send(JSON.stringify({ type: 'control', action: 'touch', phase, x, y }))
 }
 
-function onScreenPointerDown(event) {
-  if (!screenPeerName.value) return
+function onScreenPointerDown(screen, event) {
+  if (!screen.peerName) return
   if (event.button === 2) {
-    sendScreenControl('back')
+    sendScreenControl(screen, 'back')
     return
   }
   if (event.button === 1) {
-    sendScreenControl('home')
+    sendScreenControl(screen, 'home')
     return
   }
   if (event.button !== 0) return
   const point = screenVideoPoint(event)
-  if (!point || !screenSession) return
-  screenSession.pressing = true
-  screenSession.lastPoint = point
-  sendScreenTouch('down', point.x, point.y)
+  if (!point || !screen.session) return
+  screen.session.pressing = true
+  screen.session.lastPoint = point
+  sendScreenTouch(screen, 'down', point.x, point.y)
   try {
     event.currentTarget.setPointerCapture(event.pointerId)
   } catch {
@@ -737,8 +772,8 @@ function onScreenPointerDown(event) {
   }
 }
 
-function onScreenPointerMove(event) {
-  const session = screenSession
+function onScreenPointerMove(screen, event) {
+  const session = screen.session
   if (!session?.pressing) return
   const point = screenVideoPoint(event)
   if (!point) return
@@ -747,13 +782,13 @@ function onScreenPointerMove(event) {
   session.moveTimer = window.setTimeout(() => {
     session.moveTimer = undefined
     if (session.pressing && session.lastPoint) {
-      sendScreenTouch('move', session.lastPoint.x, session.lastPoint.y)
+      sendScreenTouch(screen, 'move', session.lastPoint.x, session.lastPoint.y)
     }
   }, 16)
 }
 
-function onScreenPointerUp(event) {
-  const session = screenSession
+function onScreenPointerUp(screen, event) {
+  const session = screen.session
   if (!session?.pressing || (event.type !== 'pointercancel' && event.button !== 0)) return
   session.pressing = false
   if (session.moveTimer != null) {
@@ -761,23 +796,23 @@ function onScreenPointerUp(event) {
     session.moveTimer = undefined
   }
   const point = screenVideoPoint(event) ?? session.lastPoint
-  if (point) sendScreenTouch('up', point.x, point.y)
+  if (point) sendScreenTouch(screen, 'up', point.x, point.y)
 }
 
-function onScreenWheel(event) {
-  const session = screenSession
+function onScreenWheel(screen, event) {
+  const session = screen.session
   const point = screenVideoPoint(event)
-  if (!point || !screenPeerName.value || session?.socket?.readyState !== WebSocket.OPEN) return
+  if (!point || !screen.peerName || session?.socket?.readyState !== WebSocket.OPEN) return
   const dx = Math.max(-1, Math.min(1, event.deltaX / 120))
   const dy = Math.max(-1, Math.min(1, -event.deltaY / 120))
   if (dx === 0 && dy === 0) return
   session.socket.send(JSON.stringify({ type: 'control', action: 'scroll', x: point.x, y: point.y, dx, dy }))
 }
 
-function disconnectScreen() {
-  const serial = screenSerial.value
-  const wasConnected = screenConnected.value
-  const session = screenSession
+function disconnectScreen(screen) {
+  const serial = screen.serial
+  const wasConnected = screen.connected
+  const session = screen.session
   if (session) {
     session.generation += 1
     const current = session.socket
@@ -788,11 +823,11 @@ function disconnectScreen() {
       session.moveTimer = undefined
     }
     session.pressing = false
-    closeScreenPeer()
+    closeScreenPeer(screen)
   }
-  screenConnected.value = false
-  screenHasVideo.value = false
-  screenPeerName.value = ''
+  screen.connected = false
+  screen.hasVideo = false
+  screen.peerName = ''
   if (wasConnected && serial) {
     void sendScreenLinkCmd(serial, 'end').catch(() => {})
   }
@@ -829,9 +864,20 @@ onMounted(() => {
   void loadWebRTCConfig()
 })
 
+onActivated(() => {
+  if (locationMap) setTimeout(() => locationMap.invalidateSize(), 50)
+  for (const screen of screens.value) {
+    const video = screen.session?.video
+    const stream = screen.session?.stream
+    if (!video || !stream) continue
+    if (video.srcObject !== stream) video.srcObject = stream
+    void video.play().catch(() => {})
+  }
+})
+
 onUnmounted(() => {
   window.clearTimeout(screenHintTimer)
-  disconnectScreen()
+  for (const screen of screens.value) disconnectScreen(screen)
 })
 </script>
 
@@ -944,6 +990,17 @@ onUnmounted(() => {
                       aria-label="连接"
                       @click="openContainerScreen(item)"
                     />
+                    <Button
+                      v-if="item.name"
+                      v-tooltip.top="'终端'"
+                      icon="pi pi-desktop"
+                      text
+                      rounded
+                      size="small"
+                      severity="secondary"
+                      aria-label="终端"
+                      @click="openContainerTerminal(item)"
+                    />
                   </li>
                 </ul>
                 <span v-else class="text-muted-color">无容器</span>
@@ -1013,42 +1070,48 @@ onUnmounted(() => {
     </Dialog>
 
     <DeviceMetaEditor v-model:visible="deviceEditorVisible" :serial="deviceEditorSerial" />
+    <DeviceTerminalHost ref="terminalHost" />
 
     <Dialog
-      v-model:visible="screenVisible"
-      :header="screenTitle ? `容器画面 · ${screenTitle}` : '容器画面'"
-      modal
-      :style="{ width: '420px' }"
-      @hide="disconnectScreen"
+      v-for="screen in screens"
+      :key="screen.id"
+      :visible="screen.visible"
+      :header="screen.title ? `容器画面 · ${screen.title}` : '容器画面'"
+      :modal="false"
+      :close-on-escape="false"
+      :style="screenDialogStyle(screen)"
+      :pt="{ root: { onMousedown: raiseScreenDialog } }"
+      @update:visible="(visible) => !visible && closeScreen(screen)"
+      @after-hide="removeScreen(screen)"
     >
       <div class="flex flex-col gap-3">
         <div class="flex h-[640px] items-center justify-center overflow-hidden rounded-md bg-black">
-          <i v-show="!screenHasVideo" class="pi pi-image text-4xl text-muted-color" aria-label="等待画面" />
+          <i v-show="!screen.hasVideo" class="pi pi-image text-4xl text-muted-color" aria-label="等待画面" />
           <video
-            v-show="screenHasVideo"
-            :ref="setScreenVideo"
+            v-show="screen.hasVideo"
+            :ref="(element) => setScreenVideo(screen, element)"
             autoplay
             playsinline
             muted
             class="max-h-full bg-black touch-none select-none"
-            :aria-label="screenTitle || '容器画面'"
-            :style="{ aspectRatio: String(screenRatio), height: '100%' }"
-            @loadedmetadata="syncScreenRatio"
-            @pointerdown.prevent="onScreenPointerDown"
-            @pointermove="onScreenPointerMove"
-            @pointerup="onScreenPointerUp"
-            @pointercancel="onScreenPointerUp"
+            :aria-label="screen.title || '容器画面'"
+            :style="{ aspectRatio: String(screen.ratio), height: '100%' }"
+            @loadedmetadata="syncScreenRatio(screen, $event)"
+            @pointerdown.prevent="onScreenPointerDown(screen, $event)"
+            @pointermove="onScreenPointerMove(screen, $event)"
+            @pointerup="onScreenPointerUp(screen, $event)"
+            @pointercancel="onScreenPointerUp(screen, $event)"
             @contextmenu.prevent
-            @wheel.prevent="onScreenWheel"
+            @wheel.prevent="onScreenWheel(screen, $event)"
           />
         </div>
         <div class="flex justify-center gap-1">
-          <Button icon="pi pi-arrow-left" rounded outlined aria-label="返回" size="small" :disabled="!screenPeerName" @click="sendScreenControl('back')" />
-          <Button icon="pi pi-home" rounded outlined aria-label="主页" size="small" :disabled="!screenPeerName" @click="sendScreenControl('home')" />
-          <Button icon="pi pi-clone" rounded outlined aria-label="最近任务" size="small" :disabled="!screenPeerName" @click="sendScreenControl('recents')" />
-          <Button icon="pi pi-camera" rounded outlined aria-label="截图" size="small" :disabled="!screenPeerName" @click="sendScreenControl('shot')" />
+          <Button icon="pi pi-arrow-left" rounded outlined aria-label="返回" size="small" :disabled="!screen.peerName" @click="sendScreenControl(screen, 'back')" />
+          <Button icon="pi pi-home" rounded outlined aria-label="主页" size="small" :disabled="!screen.peerName" @click="sendScreenControl(screen, 'home')" />
+          <Button icon="pi pi-clone" rounded outlined aria-label="最近任务" size="small" :disabled="!screen.peerName" @click="sendScreenControl(screen, 'recents')" />
+          <Button icon="pi pi-camera" rounded outlined aria-label="截图" size="small" :disabled="!screen.peerName" @click="sendScreenControl(screen, 'shot')" />
         </div>
-        <p class="truncate text-xs text-muted-color">{{ screenStatus }}</p>
+        <p class="truncate text-xs text-muted-color">{{ screen.status }}</p>
       </div>
     </Dialog>
 

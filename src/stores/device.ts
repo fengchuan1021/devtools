@@ -22,12 +22,6 @@ export interface NodeBounds {
   height: number
 }
 
-export interface DeviceTerminalSession {
-  id: string
-  serial: string
-  visible: boolean
-}
-
 function asDevice(value: unknown): DeviceRecord | null {
   if (typeof value === 'string' && value) return { serial: value }
   if (!value || typeof value !== 'object') return null
@@ -50,7 +44,6 @@ export const useDeviceStore = defineStore('device', () => {
   const selectedPoint = ref<DevicePoint | null>(null)
   const containingNodesBounds = ref<NodeBounds[]>([])
   const isscrcpy = ref(false)
-  const terminals = ref<DeviceTerminalSession[]>([])
 
   const selectedSerial = computed(() => {
     const device = selectedDevice.value
@@ -110,18 +103,6 @@ export const useDeviceStore = defineStore('device', () => {
     isscrcpy.value = !!value
   }
 
-  function openTerminal() {
-    terminals.value.push({
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      serial: selectedSerial.value,
-      visible: true,
-    })
-  }
-
-  function closeTerminal(id: string) {
-    terminals.value = terminals.value.filter((item) => item.id !== id)
-  }
-
   function setSelectedPoint(point: DevicePoint | null) {
     selectedPoint.value =
       point == null ? null : { x: Math.round(point.x), y: Math.round(point.y) }
@@ -140,7 +121,6 @@ export const useDeviceStore = defineStore('device', () => {
     selectedPoint,
     containingNodesBounds,
     isscrcpy,
-    terminals,
     selectedSerial,
     searchDevices,
     setSelectedDevice,
@@ -148,8 +128,6 @@ export const useDeviceStore = defineStore('device', () => {
     addDevice,
     refreshScreenshot,
     setIsScrcpy,
-    openTerminal,
-    closeTerminal,
     setSelectedPoint,
     setContainingNodesBounds,
   }

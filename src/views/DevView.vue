@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import DeviceScreenshotArea from '../components/DeviceScreenshotArea.vue'
 import DeviceTerminalHost from '../components/DeviceTerminalHost.vue'
 import DeviceToolbar from '../components/DeviceToolbar.vue'
@@ -12,6 +12,7 @@ import { useDeviceStore } from '../stores/device'
 
 const deviceStore = useDeviceStore()
 const { selectedDevice, selectedSerial } = storeToRefs(deviceStore)
+const terminalHost = ref<{ openTerminal: (serial?: string) => void } | null>(null)
 const { connect } = useWebSocket(selectedDevice)
 
 onMounted(() => {
@@ -22,7 +23,7 @@ onMounted(() => {
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <header class="flex shrink-0 items-center border-b border-surface px-4 py-2">
-      <DeviceToolbar />
+      <DeviceToolbar @open-terminal="terminalHost?.openTerminal(selectedSerial)" />
     </header>
 
     <div class="flex min-h-0 flex-1 gap-3 p-3">
@@ -39,6 +40,6 @@ onMounted(() => {
         <LogPanel class="min-h-40 flex-1" :serial="selectedSerial" />
       </aside>
     </div>
-    <DeviceTerminalHost />
+    <DeviceTerminalHost ref="terminalHost" />
   </div>
 </template>

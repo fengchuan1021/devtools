@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { storeToRefs } from 'pinia'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
-import { nextTick, reactive } from 'vue'
-import { useDeviceStore } from '../stores/device'
+import { nextTick, reactive, ref } from 'vue'
 import DeviceTerminal from './DeviceTerminal.vue'
 
-const deviceStore = useDeviceStore()
-const { terminals } = storeToRefs(deviceStore)
+interface TerminalSession {
+  id: string
+  serial: string
+  visible: boolean
+}
+
+const terminals = ref<TerminalSession[]>([])
 
 type TermApi = {
   focus: () => void
@@ -46,11 +49,21 @@ function dialogStyle(index: number) {
   }
 }
 
+function openTerminal(serial = '') {
+  terminals.value.push({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    serial: serial.trim(),
+    visible: true,
+  })
+}
+
 function onHide(id: string) {
   apis.delete(id)
   delete statusText[id]
-  deviceStore.closeTerminal(id)
+  terminals.value = terminals.value.filter((item) => item.id !== id)
 }
+
+defineExpose({ openTerminal })
 
 function setTerm(id: string, el: unknown) {
   if (el && typeof el === 'object' && 'focus' in el) apis.set(id, el as TermApi)
@@ -75,6 +88,7 @@ function refit(id: string) {
     v-for="(term, index) in terminals"
     :key="term.id"
     v-model:visible="term.visible"
+    append-to="self"
     :modal="false"
     :dismissable-mask="false"
     :closable="true"

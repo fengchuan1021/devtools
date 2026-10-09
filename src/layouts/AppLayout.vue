@@ -25,7 +25,11 @@ const route = useRoute()
         </nav>
       </aside>
       <main class="min-w-0 flex-1 overflow-auto">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <KeepAlive>
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </main>
     </div>
   </div>

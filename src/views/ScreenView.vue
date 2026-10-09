@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import { installDroppedApk, sendScreenLinkCmd } from '../api/device'
 import DeviceMetaEditor from '../components/DeviceMetaEditor.vue'
+import DeviceTerminalHost from '../components/DeviceTerminalHost.vue'
+import { useDeviceStore } from '../stores/device'
 import request from '../utils/request'
 
 interface DeviceGroup {
@@ -37,6 +39,8 @@ interface Session {
   generation: number
 }
 
+const deviceStore = useDeviceStore()
+const terminalHost = ref<{ openTerminal: (serial?: string) => void } | null>(null)
 const deviceEditorVisible = ref(false)
 const deviceEditorSerial = ref('')
 const relay = ref('')
@@ -66,16 +70,29 @@ const visibleTiles = computed(() => {
 })
 
 onMounted(() => {
-  window.addEventListener('keydown', onShortcutKey, true)
-  window.addEventListener('keyup', onShortcutKey, true)
-  window.addEventListener('blur', releaseHeldKeys)
   void Promise.all([loadWebRTCConfig(), loadDevices()])
 })
 
-onUnmounted(() => {
+onActivated(() => {
+  window.addEventListener('keydown', onShortcutKey, true)
+  window.addEventListener('keyup', onShortcutKey, true)
+  window.addEventListener('blur', releaseHeldKeys)
+  for (const session of sessions.values()) {
+    const video = session.video
+    if (!video || !session.stream) continue
+    if (video.srcObject !== session.stream) video.srcObject = session.stream
+    void video.play().catch(() => {})
+  }
+})
+
+onDeactivated(() => {
   window.removeEventListener('keydown', onShortcutKey, true)
   window.removeEventListener('keyup', onShortcutKey, true)
   window.removeEventListener('blur', releaseHeldKeys)
+  releaseHeldKeys()
+})
+
+onUnmounted(() => {
   for (const tile of tiles.value) disconnectTile(tile)
 })
 
@@ -158,6 +175,12 @@ function rebuildTiles(list: DeviceGroup[]) {
 
 function selectGroup(id: number | 'all') {
   selectedGroup.value = id
+}
+
+function openTerminal(tile: Tile) {
+  const serial = tile.serial.trim()
+  if (!serial) return
+  terminalHost.value?.openTerminal(serial)
 }
 
 function tileFocused(tile: Tile) {
@@ -320,6 +343,7 @@ function openPeer(tile: Tile) {
     const stream = event.streams[0] ?? new MediaStream([event.track])
     session.stream = stream
     tile.hasVideo = true
+    preferLivePlayback(connection)
     if (session.video) {
       session.video.srcObject = stream
       void session.video.play().catch(() => {})
@@ -339,9 +363,23 @@ function openPeer(tile: Tile) {
   }
   connection.oniceconnectionstatechange = () => {
     if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
+      preferLivePlayback(connection)
       tile.status = '画面通道已建立'
     } else if (connection.iceConnectionState === 'failed') {
       tile.status = 'UDP 打洞失败'
+    }
+  }
+}
+
+function preferLivePlayback(connection: RTCPeerConnection) {
+  for (const receiver of connection.getReceivers()) {
+    if (receiver.track.kind !== 'video') continue
+    const live = receiver as RTCRtpReceiver & { playoutDelayHint?: number; jitterBufferTarget?: number }
+    try {
+      live.playoutDelayHint = 0
+      if ('jitterBufferTarget' in live) live.jitterBufferTarget = 0
+    } catch {
+      // 浏览器拒绝过小的缓冲目标时，沿用它自己的下限
     }
   }
 }
@@ -656,6 +694,9 @@ function disconnectTile(tile: Tile) {
           <span v-tooltip.top="'编辑'" class="inline-flex">
             <Button icon="pi pi-pencil" rounded outlined size="small" aria-label="编辑" @click="editTile(tile)" />
           </span>
+          <span v-tooltip.top="'终端'" class="inline-flex">
+            <Button icon="pi pi-desktop" rounded outlined size="small" aria-label="终端" @click="openTerminal(tile)" />
+          </span>
 
           <span v-tooltip.top="'连接'" class="inline-flex">
             <Button icon="pi pi-link" rounded outlined size="small" aria-label="连接" :disabled="tile.connected" :class="tile.connected ? 'pointer-events-none' : ''" @click="connectTile(tile)" />
@@ -716,5 +757,6 @@ function disconnectTile(tile: Tile) {
       </article>
     </div>
     <DeviceMetaEditor v-model:visible="deviceEditorVisible" :serial="deviceEditorSerial" @saved="loadDevices" />
+    <DeviceTerminalHost ref="terminalHost" />
   </section>
 </template>

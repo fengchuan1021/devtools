@@ -6,6 +6,7 @@ import { getDevices } from '../api/device'
 import AutoComplete from 'primevue/autocomplete'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+const emit = defineEmits(['open-terminal'])
 const deviceStore = useDeviceStore()
 const selectedDevice = ref(null)
 function deviceSerial(device) {
@@ -65,7 +66,7 @@ function onRefresh() {
       icon="pi pi-desktop"
       label="终端"
       severity="secondary"
-      @click="deviceStore.openTerminal()"
+      @click="emit('open-terminal')"
     />
   </div>
 </template>
