@@ -137,19 +137,23 @@ export async function runDeviceShell(serial, command) {
 
 /**
  * 操作设备交互式 PTY 会话
- * @param {'open'|'write'|'interrupt'|'close'} op
+ * @param {'open'|'write'|'interrupt'|'close'|'resize'} op
+ * @param {{ cols?: number, rows?: number }} [size]
  */
-export async function runDeviceShellSession(serial, session, op, data = '', seq = 0) {
+export async function runDeviceShellSession(serial, session, op, data = '', seq = 0, size) {
   if (!serial?.trim()) throw new Error('serial 必填')
   if (!session?.trim()) throw new Error('session 必填')
   if (!op) throw new Error('op 必填')
-  const res = await request.post('/api/dev/shell', {
+  const body = {
     serial: serial.trim(),
     session: String(session),
     op,
     data: data == null ? '' : String(data),
     seq: Number(seq) || 0,
-  })
+  }
+  if (size?.cols) body.cols = size.cols
+  if (size?.rows) body.rows = size.rows
+  const res = await request.post('/api/dev/shell', body)
   return res?.data ?? ''
 }
 
@@ -157,7 +161,7 @@ export async function runDeviceShellSession(serial, session, op, data = '', seq 
  * 订阅 PTY 输出（SSE）。token 走 header，需浏览器 ReadableStream。
  * @returns {Promise<void>}
  */
-export async function openDeviceShellStream(serial, session, { onEvent, signal } = {}) {
+export async function openDeviceShellStream(serial, session, { onEvent, onOpen, signal } = {}) {
   if (!serial?.trim()) throw new Error('serial 必填')
   if (!session?.trim()) throw new Error('session 必填')
   const headers = {}
@@ -175,6 +179,7 @@ export async function openDeviceShellStream(serial, session, { onEvent, signal }
     throw new Error(data?.error || data?.msg || '订阅终端输出失败')
   }
   if (!res.body) throw new Error('浏览器不支持流式输出')
+  onOpen?.()
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''

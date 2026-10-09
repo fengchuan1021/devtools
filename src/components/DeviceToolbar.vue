@@ -1,13 +1,17 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useDeviceStore } from '../stores/device'
+import { storeToRefs } from 'pinia'
 import { getDevices } from '../api/device'
 import AutoComplete from 'primevue/autocomplete'
 import Button from 'primevue/button'
-
+import Checkbox from 'primevue/checkbox'
 const deviceStore = useDeviceStore()
 const selectedDevice = ref(null)
-
+function deviceSerial(device) {
+  if (!device) return ''
+  return typeof device === 'string' ? device : (device.serial || '')
+}
 // 加载后获取设备列表
 onMounted(async () => {
   try {
@@ -55,6 +59,13 @@ function onRefresh() {
       label="刷新"
       severity="secondary"
       @click="onRefresh"
+    />
+ 
+    <Button
+      icon="pi pi-desktop"
+      label="终端"
+      severity="secondary"
+      @click="deviceStore.openTerminal()"
     />
   </div>
 </template>

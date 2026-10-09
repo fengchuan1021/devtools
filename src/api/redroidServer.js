@@ -24,12 +24,12 @@ export function listRedroidContainers(id) {
   return request.get(`/api/redroid_server/containers?id=${id}`)
 }
 
-export function startRedroidContainer(id, serial) {
-  return request.post('/api/redroid_server/container/start', { id, serial })
+export function startRedroidContainer(id, name) {
+  return request.post('/api/redroid_server/container/start', { id, name })
 }
 
-export function stopRedroidContainer(id, serial) {
-  return request.post('/api/redroid_server/container/stop', { id, serial })
+export function stopRedroidContainer(id, name) {
+  return request.post('/api/redroid_server/container/stop', { id, name })
 }
 
 export function getRedroidContainerLocation(serial) {
