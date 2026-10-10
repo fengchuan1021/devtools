@@ -5,6 +5,7 @@ import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import L from 'leaflet'
@@ -24,6 +25,7 @@ import {
   listRedroidContainers,
   startRedroidContainer,
   stopRedroidContainer,
+  createRedroidContainer,
   getRedroidContainerLocation,
   updateRedroidContainerLocation
 } from '../api/redroidServer'
@@ -92,11 +94,28 @@ const dialogLoading = ref(false)
 const dialogError = ref('')
 const editingId = ref(null)
 const locationVisible = ref(false)
+const locationPurpose = ref('save')
 const locationLoading = ref(false)
 const locationSaving = ref(false)
 const locationError = ref('')
 const locationName = ref('')
 const locationPoint = ref(null)
+const createVisible = ref(false)
+const createSaving = ref(false)
+const createError = ref('')
+const createServer = ref(null)
+const createForm = ref(emptyCreateForm())
+const containerImageOptions = [
+  {
+    label: '192.168.1.231:5000/redroid:12.0.0-arm64',
+    value: '192.168.1.231:5000/redroid:12.0.0-arm64'
+  },
+  {
+    label: '192.168.1.231:5000/redroid:12.0.0-arm64-gms',
+    value: '192.168.1.231:5000/redroid:12.0.0-arm64-gms'
+  }
+]
+const localeOptions = [{ label: '中文', value: 'zh-CN' }]
 const mapEl = ref(null)
 let locationMap = null
 let locationMarker = null
@@ -130,6 +149,33 @@ function emptyForm() {
     ip: '',
     expire_at: '',
     note: ''
+  }
+}
+
+function randomSerial() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  const out = []
+  const bytes = new Uint8Array(32)
+  while (out.length < 16) {
+    crypto.getRandomValues(bytes)
+    for (const value of bytes) {
+      if (value >= 252) continue
+      out.push(alphabet[value % alphabet.length])
+      if (out.length === 16) break
+    }
+  }
+  return out.join('')
+}
+
+function emptyCreateForm() {
+  return {
+    name: '',
+    serial: randomSerial(),
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    latitude: null,
+    longitude: null,
+    image: '192.168.1.231:5000/redroid:12.0.0-arm64'
   }
 }
 
@@ -375,6 +421,7 @@ async function openLocation(item) {
   const serial = item?.serial
   if (!serial) return
   destroyLocationMap()
+  locationPurpose.value = 'save'
   locationName.value = serial
   locationPoint.value = null
   locationError.value = ''
@@ -410,8 +457,88 @@ function closeLocation() {
   destroyLocationMap()
 }
 
+function openCreateLocation() {
+  destroyLocationMap()
+  locationPurpose.value = 'pick'
+  locationName.value = ''
+  const { latitude, longitude } = createForm.value
+  locationPoint.value = latitude != null && longitude != null ? { lat: latitude, lng: longitude } : null
+  locationError.value = ''
+  locationLoading.value = false
+  locationVisible.value = true
+}
+
+function createContainer(row) {
+  createServer.value = row
+  createForm.value = emptyCreateForm()
+  createError.value = ''
+  createVisible.value = true
+}
+
+async function confirmCreate() {
+  const server = createServer.value
+  if (!server) return
+  const name = createForm.value.name.trim()
+  const serial = createForm.value.serial.trim()
+  const locale = createForm.value.locale.trim()
+  const timezone = createForm.value.timezone.trim()
+  if (!/^[a-z0-9][a-z0-9-]{0,127}$/.test(name) || name === 'redroid') {
+    createError.value = '容器名称须为小写字母、数字或连字符'
+    return
+  }
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(serial)) {
+    createError.value = '序列号无效'
+    return
+  }
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(locale)) {
+    createError.value = '语言无效'
+    return
+  }
+  if (!/^[A-Za-z0-9._+\/-]{1,64}$/.test(timezone)) {
+    createError.value = '时区无效'
+    return
+  }
+  if (createForm.value.latitude == null || createForm.value.longitude == null) {
+    createError.value = '请选择经纬度'
+    return
+  }
+  createSaving.value = true
+  createError.value = ''
+  try {
+    await createRedroidContainer({
+      id: server.id,
+      name,
+      serial,
+      locale,
+      timezone,
+      latitude: createForm.value.latitude,
+      longitude: createForm.value.longitude,
+      image: createForm.value.image
+    })
+    createVisible.value = false
+    await reloadContainers(server)
+  } catch (error) {
+    createError.value = error?.response?.data?.error || error?.message || '创建失败'
+  } finally {
+    createSaving.value = false
+  }
+}
+
 async function confirmLocation() {
   const point = locationPoint.value
+  if (locationPurpose.value === 'pick') {
+    if (!point) {
+      locationError.value = '请在地图上选择位置'
+      return
+    }
+    createForm.value = {
+      ...createForm.value,
+      latitude: point.lat,
+      longitude: point.lng
+    }
+    closeLocation()
+    return
+  }
   if (!locationName.value || !point) {
     locationError.value = '请在地图上选择位置'
     return
@@ -1053,14 +1180,76 @@ onUnmounted(() => {
     </div>
 
     <Dialog
+      v-model:visible="createVisible"
+      header="创建容器"
+      modal
+      :style="{ width: '480px' }"
+      @hide="createError = ''"
+    >
+      <div class="flex flex-col gap-4">
+        <Message v-if="createError" severity="error" :closable="false">{{ createError }}</Message>
+        <label class="flex flex-col gap-2 text-sm" for="container-name">
+          容器名称
+          <InputText id="container-name" v-model="createForm.name" placeholder="小写字母、数字或连字符" fluid />
+        </label>
+        <label class="flex flex-col gap-2 text-sm" for="container-serial">
+          序列号
+          <InputText id="container-serial" v-model="createForm.serial" maxlength="128" fluid />
+        </label>
+        <label class="flex flex-col gap-2 text-sm" for="container-locale">
+          语言
+          <Select
+            v-model="createForm.locale"
+            input-id="container-locale"
+            :options="localeOptions"
+            option-label="label"
+            option-value="value"
+            fluid
+          />
+        </label>
+        <label class="flex flex-col gap-2 text-sm" for="container-timezone">
+          时区
+          <InputText id="container-timezone" v-model="createForm.timezone" fluid />
+        </label>
+        <div class="flex flex-col gap-2 text-sm">
+          经纬度
+          <div class="flex items-center justify-between gap-3">
+            <span v-if="createForm.latitude != null && createForm.longitude != null">
+              纬度 {{ formatCoord(createForm.latitude) }}，经度 {{ formatCoord(createForm.longitude) }}
+            </span>
+            <span v-else class="text-muted-color">尚未选择位置</span>
+            <Button label="选择位置" severity="secondary" size="small" @click="openCreateLocation" />
+          </div>
+        </div>
+        <label class="flex flex-col gap-2 text-sm" for="container-image">
+          镜像地址
+          <Select
+            v-model="createForm.image"
+            input-id="container-image"
+            :options="containerImageOptions"
+            option-label="label"
+            option-value="value"
+            fluid
+          />
+        </label>
+      </div>
+      <template #footer>
+        <Button label="取消" severity="secondary" text :disabled="createSaving" @click="createVisible = false" />
+        <Button label="创建" :loading="createSaving" @click="confirmCreate" />
+      </template>
+    </Dialog>
+
+    <Dialog
       v-model:visible="locationVisible"
-      :header="locationName ? `设置位置 · ${locationName}` : '设置位置'"
+      :header="locationPurpose === 'pick' ? '选择位置' : locationName ? `设置位置 · ${locationName}` : '设置位置'"
       modal
       :style="{ width: '760px' }"
       @show="onLocationDialogShow"
       @hide="destroyLocationMap"
     >
-      <p class="mb-3 text-sm text-muted-color">在地图上点击选择位置，保存后写入该设备的经纬度。</p>
+      <p class="mb-3 text-sm text-muted-color">
+        {{ locationPurpose === 'pick' ? '在地图上点击选择位置。' : '在地图上点击选择位置，保存后写入该设备的经纬度。' }}
+      </p>
       <div v-if="locationLoading" class="flex h-[420px] items-center justify-center gap-2 text-sm text-muted-color">
         <i class="pi pi-spin pi-spinner" />
         加载中...

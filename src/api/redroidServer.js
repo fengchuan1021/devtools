@@ -32,6 +32,10 @@ export function stopRedroidContainer(id, name) {
   return request.post('/api/redroid_server/container/stop', { id, name })
 }
 
+export function createRedroidContainer(data) {
+  return request.post('/api/redroid_server/container/create', data)
+}
+
 export function getRedroidContainerLocation(serial) {
   return request.get(`/api/redroid_server/container/location?serial=${encodeURIComponent(serial)}`)
 }
