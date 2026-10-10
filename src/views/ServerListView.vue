@@ -1022,6 +1022,16 @@ onUnmounted(() => {
                     @click="openEdit(row)"
                   />
                   <Button
+                    v-tooltip.top="'创建容器'"
+                    icon="pi pi-plus"
+                    text
+                    rounded
+                    size="small"
+                    severity="secondary"
+                    aria-label="创建容器"
+                    @click="createContainer(row)"
+                  />
+                  <Button
                     v-tooltip.top="'删除'"
                     icon="pi pi-trash"
                     text
