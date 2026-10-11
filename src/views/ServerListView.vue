@@ -25,6 +25,7 @@ import {
   listRedroidContainers,
   startRedroidContainer,
   stopRedroidContainer,
+  deleteRedroidContainer,
   createRedroidContainer,
   getRedroidContainerLocation,
   updateRedroidContainerLocation
@@ -133,6 +134,9 @@ const form = ref(emptyForm())
 const expireDate = ref(null)
 const pendingDelete = ref(null)
 const deleting = ref(false)
+const pendingContainerDelete = ref(null)
+const deletingContainer = ref(false)
+const containerDeleteError = ref('')
 
 function setExpireDate(value) {
   if (!value) {
@@ -960,6 +964,47 @@ function disconnectScreen(screen) {
   }
 }
 
+function askDeleteContainer(row, item) {
+  const name = item?.name
+  if (!name || name === 'redroid' || containerAction(row.id, name)) return
+  containerDeleteError.value = ''
+  pendingContainerDelete.value = { server: row, item }
+}
+
+function closeDeleteContainer() {
+  if (deletingContainer.value) return
+  pendingContainerDelete.value = null
+  containerDeleteError.value = ''
+}
+
+async function confirmDeleteContainer() {
+  const pending = pendingContainerDelete.value
+  if (!pending) return
+  const { server, item } = pending
+  const name = item?.name
+  if (!name) return
+  const key = busyKey(server.id, name)
+  deletingContainer.value = true
+  containerDeleteError.value = ''
+  containerBusy.value = { ...containerBusy.value, [key]: 'delete' }
+  try {
+    await deleteRedroidContainer(server.id, name)
+    for (const screen of screens.value) {
+      if (item.serial && screen.serial === item.serial) closeScreen(screen)
+    }
+    pendingContainerDelete.value = null
+    await reloadContainers(server)
+  } catch (error) {
+    containerDeleteError.value = error?.response?.data?.error || error?.message || '删除失败'
+    await reloadContainers(server)
+  } finally {
+    deletingContainer.value = false
+    const next = { ...containerBusy.value }
+    delete next[key]
+    containerBusy.value = next
+  }
+}
+
 function askDelete(row) {
   pendingDelete.value = row
 }
@@ -1127,6 +1172,20 @@ onUnmounted(() => {
                       severity="secondary"
                       aria-label="终端"
                       @click="openContainerTerminal(item)"
+                    />
+
+                    <Button
+                      v-if="item.name && item.name !== 'redroid'"
+                      v-tooltip.top="'删除'"
+                      icon="pi pi-trash"
+                      text
+                      rounded
+                      size="small"
+                      severity="secondary"
+                      aria-label="删除"
+                      :disabled="!!containerAction(row.id, item.name)"
+                      :loading="containerAction(row.id, item.name) === 'delete'"
+                      @click="askDeleteContainer(row, item)"
                     />
                   </li>
                 </ul>
@@ -1352,6 +1411,23 @@ onUnmounted(() => {
       <template #footer>
         <Button label="取消" severity="secondary" text @click="dialogVisible = false" />
         <Button label="保存" :loading="dialogLoading" @click="confirmSave" />
+      </template>
+    </Dialog>
+
+    <Dialog
+      :visible="pendingContainerDelete != null"
+      header="删除容器"
+      modal
+      :style="{ width: '420px' }"
+      @update:visible="(visible) => !visible && closeDeleteContainer()"
+    >
+      <p class="text-sm">
+        确定删除容器「{{ pendingContainerDelete?.item?.name }}」吗？容器、数据盘和对应的设备记录都会删除。
+      </p>
+      <Message v-if="containerDeleteError" severity="error" :closable="false" class="mt-3">{{ containerDeleteError }}</Message>
+      <template #footer>
+        <Button label="取消" severity="secondary" text :disabled="deletingContainer" @click="closeDeleteContainer" />
+        <Button label="删除" severity="danger" :loading="deletingContainer" @click="confirmDeleteContainer" />
       </template>
     </Dialog>
 

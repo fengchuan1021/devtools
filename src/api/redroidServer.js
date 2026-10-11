@@ -32,6 +32,10 @@ export function stopRedroidContainer(id, name) {
   return request.post('/api/redroid_server/container/stop', { id, name })
 }
 
+export function deleteRedroidContainer(id, name) {
+  return request.post('/api/redroid_server/container/delete', { id, name })
+}
+
 export function createRedroidContainer(data) {
   return request.post('/api/redroid_server/container/create', data)
 }
