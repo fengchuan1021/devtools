@@ -376,8 +376,9 @@ function preferLivePlayback(connection: RTCPeerConnection) {
     if (receiver.track.kind !== 'video') continue
     const live = receiver as RTCRtpReceiver & { playoutDelayHint?: number; jitterBufferTarget?: number }
     try {
-      live.playoutDelayHint = 0
-      if ('jitterBufferTarget' in live) live.jitterBufferTarget = 0
+      // 0 会让抖动缓冲没有余量。丢一帧之后 video 元素停在最后一帧，直到重连。
+      live.playoutDelayHint = 0.2
+      if ('jitterBufferTarget' in live) live.jitterBufferTarget = 200
     } catch {
       // 浏览器拒绝过小的缓冲目标时，沿用它自己的下限
     }
