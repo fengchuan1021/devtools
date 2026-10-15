@@ -5,7 +5,6 @@ import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } fro
 import { installDroppedApk, sendScreenLinkCmd } from '../api/device'
 import DeviceMetaEditor from '../components/DeviceMetaEditor.vue'
 import DeviceTerminalHost from '../components/DeviceTerminalHost.vue'
-import { useDeviceStore } from '../stores/device'
 import request from '../utils/request'
 
 interface DeviceGroup {
@@ -39,7 +38,6 @@ interface Session {
   generation: number
 }
 
-const deviceStore = useDeviceStore()
 const terminalHost = ref<{ openTerminal: (serial?: string) => void } | null>(null)
 const deviceEditorVisible = ref(false)
 const deviceEditorSerial = ref('')

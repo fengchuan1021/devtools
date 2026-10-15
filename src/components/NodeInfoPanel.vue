@@ -243,7 +243,7 @@ function copySelectionValueWithoutNewline(event: ClipboardEvent) {
   if (!anchorEl || anchorEl !== focusEl) return
   copyEntryValueWithoutNewline(event, anchorEl.getAttribute('data-copy-value') ?? '')
 }
-function getWidthHeight(node) {
+function getWidthHeight(node: XmlAttrs) {
   if (!node.bounds) return ''
   let reg = /\[(\d+),(\d+)\]\[(\d+),(\d+)\]/
   let matched = node.bounds.match(reg)
